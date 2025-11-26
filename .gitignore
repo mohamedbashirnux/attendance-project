@@ -1,0 +1,9 @@
+# Only ignore OS-generated files
+Thumbs.db
+desktop.ini
+.DS_Store
+*~
+
+# Temporary files
+*.tmp
+*.temp

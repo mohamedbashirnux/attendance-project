@@ -1,0 +1,187 @@
+<?php
+// Start session
+session_start();
+
+// Check if the user is not logged in
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    // Redirect to login page
+    header("Location: ../interval/auth_admin.php");
+    exit();
+}
+
+// Get the username from the session, if set
+$username = isset($_SESSION['admin_user']) ? $_SESSION['admin_user'] : '';
+?>
+
+<!DOCTYPE html>
+<html lang="en" class="light-style layout-menu-fixed" dir="ltr" data-theme="theme-default" data-assets-path="../assets/" data-template="vertical-menu-template-free">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <title>Admin Management</title>
+    <link rel="icon" type="image/x-icon" href="../assets/images/capital.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/vendor/fonts/boxicons.css" />
+    <link rel="stylesheet" href="../assets/vendor/css/core.css" />
+    <link rel="stylesheet" href="../assets/vendor/css/theme-default.css" />
+    <link rel="stylesheet" href="../assets/css/demo.css" />
+    <link rel="stylesheet" href="../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.css" />
+    <link rel="stylesheet" href="../assets/vendor/libs/apex-charts/apex-charts.css" />
+    <script src="../assets/vendor/js/helpers.js"></script>
+    <script src="../assets/js/config.js"></script>
+</head>
+<body>
+    <div class="layout-wrapper layout-content-navbar">
+        <div class="layout-container">
+            <?php include 'menu.php'; ?>
+            <div class="layout-page">
+                <?php include 'navbar.php'; ?>
+                <div class="content-wrapper">
+                    <div class="container-xxl flex-grow-1 container-p-y">
+                        <h4 class="fw-bold py-3 mb-4">Faculty Management</h4>
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title d-flex justify-content-between">
+                                    Faculty List
+                                    <!-- Button trigger modal -->
+                                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#basicModal">
+                                        Add Faculty
+                                    </button>
+                                </h5>
+                                <table class="table" id="facultyTable">
+                                    <thead>
+                                        <tr>
+                                            <th>FID</th>
+                                            <th>Faculty Name</th>
+                                            <th class="text-end">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Faculty data will be inserted here via AJAX -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="content-backdrop fade"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Modal -->
+    <div class="modal fade" id="basicModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exampleModalLabel1">Add Faculty</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addFacultyForm">
+                        <div class="mb-3">
+                            <label for="facultyName" class="form-label">Faculty Name</label>
+                            <input type="text" class="form-control" id="facultyName" name="facultyName" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Faculty</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exampleModalLabel2">Edit Faculty</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editFacultyForm">
+                        <input type="hidden" id="editFacultyId" name="editFacultyId">
+                        <div class="mb-3">
+                            <label for="editFacultyName" class="form-label">Faculty Name</label>
+                            <input type="text" class="form-control" id="editFacultyName" name="editFacultyName" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Update Faculty</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="../assets/vendor/libs/jquery/jquery.js"></script>
+    <script src="../assets/vendor/libs/popper/popper.js"></script>
+    <script src="../assets/vendor/js/bootstrap.js"></script>
+    <script src="../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.js"></script>
+    <script src="../assets/vendor/js/menu.js"></script>
+    <script src="../assets/vendor/libs/apex-charts/apexcharts.js"></script>
+    <script src="../assets/js/main.js"></script>
+    <script src="../assets/js/dashboards-analytics.js"></script>
+    <script>
+        $(document).ready(function() {
+            fetchFacultyList();
+
+            $('#addFacultyForm').on('submit', function(e) {
+                e.preventDefault();
+                ajaxRequest('../database/Faculty/add_faculty.php', 'POST', $(this).serialize(), function(response) {
+                    $('#addFacultyForm')[0].reset();
+                    fetchFacultyList();
+                    alert(response);
+                    $('#basicModal').modal('hide'); // Close the modal
+                });
+            });
+
+            $(document).on('click', '.edit-btn', function() {
+                var facultyId = $(this).data('id');
+                console.log("Editing faculty ID: ", facultyId);
+                ajaxRequest('../database/Faculty/get_faculty.php', 'GET', { fid: facultyId }, function(response) {
+                    var facultyData = JSON.parse(response);
+                    $('#editFacultyId').val(facultyData.fid);
+                    $('#editFacultyName').val(facultyData.faculty_name);
+                    $('#editModal').modal('show');
+                });
+            });
+
+            $(document).on('click', '.delete-btn', function() {
+                var facultyId = $(this).data('id');
+                console.log("Deleting faculty ID: ", facultyId);
+                if (confirm('Are you sure you want to delete this faculty?')) {
+                    ajaxRequest('../database/Faculty/delete_faculty.php', 'POST', { fid: facultyId }, function(response) {
+                        fetchFacultyList();
+                        alert(response);
+                    });
+                }
+            });
+
+            function fetchFacultyList() {
+                ajaxRequest('../database/Faculty/show_faculty.php', 'GET', {}, function(response) {
+                    $('#facultyTable tbody').html(response);
+                    console.log("Data fetched: ", response);
+                });
+            }
+
+            function ajaxRequest(url, method, data, successCallback) {
+                $.ajax({
+                    url: url,
+                    type: method,
+                    data: data,
+                    beforeSend: function() {
+                        $('button[type="submit"]').prop('disabled', true);
+                    },
+                    success: function(response) {
+                        $('button[type="submit"]').prop('disabled', false);
+                        successCallback(response);
+                    },
+                    error: function(xhr) {
+                        console.error("AJAX error: " + xhr.responseText);
+                        $('button[type="submit"]').prop('disabled', false);
+                        alert("An error occurred. Please try again later.");
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
