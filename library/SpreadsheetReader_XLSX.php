@@ -94,6 +94,11 @@
 		 */
 		private $Sheets = false;
 
+		/**
+		 * @var array Map of sheet rId numeric index => extracted worksheet XML path
+		 */
+		private $WorksheetPaths = array();
+
 		private $SharedStringCount = 0;
 		private $SharedStringIndex = 0;
 		private $LastSharedStringValue = null;
@@ -228,6 +233,38 @@
 				$this -> WorkbookXML = new SimpleXMLElement($Zip -> getFromName('xl/workbook.xml'));
 			}
 
+			// Worksheet relationships (rId -> target worksheet path). Some XLSX files have rId values that do not match
+			// the sheet#.xml filenames, so we must resolve via workbook.xml.rels.
+			$WorksheetTargets = array();
+			if ($Zip -> locateName('xl/_rels/workbook.xml.rels') !== false)
+			{
+				$RelsXML = new SimpleXMLElement($Zip -> getFromName('xl/_rels/workbook.xml.rels'));
+				foreach ($RelsXML -> Relationship as $Rel)
+				{
+					$Type = (string)$Rel['Type'];
+					if (strpos($Type, '/worksheet') === false)
+					{
+						continue;
+					}
+
+					$Id = (string)$Rel['Id'];
+					if (!preg_match('/^rId(\\d+)$/', $Id, $Matches))
+					{
+						continue;
+					}
+					$RidNum = (int)$Matches[1];
+
+					$Target = str_replace('\\\\', '/', (string)$Rel['Target']);
+					$Target = ltrim($Target, '/');
+					if (!str_starts_with($Target, 'xl/'))
+					{
+						$Target = 'xl/'.ltrim($Target, '/');
+					}
+
+					$WorksheetTargets[$RidNum] = $Target;
+				}
+			}
+
 			// Extracting the XMLs from the XLSX zip file
 			if ($Zip -> locateName('xl/sharedStrings.xml') !== false)
 			{
@@ -247,10 +284,16 @@
 
 			foreach ($this -> Sheets as $Index => $Name)
 			{
-				if ($Zip -> locateName('xl/worksheets/sheet'.$Index.'.xml') !== false)
+				$WorksheetZipPath = isset($WorksheetTargets[$Index]) ?
+					$WorksheetTargets[$Index] :
+					('xl/worksheets/sheet'.$Index.'.xml');
+
+				if ($Zip -> locateName($WorksheetZipPath) !== false)
 				{
-					$Zip -> extractTo($this -> TempDir, 'xl/worksheets/sheet'.$Index.'.xml');
-					$this -> TempFiles[] = $this -> TempDir.'xl'.DIRECTORY_SEPARATOR.'worksheets'.DIRECTORY_SEPARATOR.'sheet'.$Index.'.xml';
+					$Zip -> extractTo($this -> TempDir, $WorksheetZipPath);
+					$TempWorksheetPath = $this -> TempDir.str_replace('/', DIRECTORY_SEPARATOR, $WorksheetZipPath);
+					$this -> WorksheetPaths[$Index] = $TempWorksheetPath;
+					$this -> TempFiles[] = $TempWorksheetPath;
 				}
 			}
 
@@ -404,9 +447,11 @@
 				$RealSheetIndex = $SheetIndexes[$Index];
 			}
 
-			$TempWorksheetPath = $this -> TempDir.'xl/worksheets/sheet'.$RealSheetIndex.'.xml';
+			$TempWorksheetPath = isset($this -> WorksheetPaths[$RealSheetIndex]) ?
+				$this -> WorksheetPaths[$RealSheetIndex] :
+				($this -> TempDir.'xl/worksheets/sheet'.$RealSheetIndex.'.xml');
 
-			if ($RealSheetIndex !== false && is_readable($TempWorksheetPath))
+			if ($RealSheetIndex !== false && $TempWorksheetPath && is_readable($TempWorksheetPath))
 			{
 				$this -> WorksheetPath = $TempWorksheetPath;
 

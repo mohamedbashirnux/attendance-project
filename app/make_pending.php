@@ -1,34 +1,67 @@
 <?php
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Content-Type: application/json");
+
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
 include "conn.php";
 
-// Retrieve and filter the input parameters
-$class_name = filterRequest('class_name');
-$department_name = filterRequest('department_name');
-$study_mode = filterRequest('study_mode');
-$subject_name = filterRequest('subject_name');
-// $teacher_name = filterRequest('teacher_name');
+// Get the class, department, study mode, subject name, and teacher_id from the request
+$class_name = trim(html_entity_decode(filterRequest('class_name'), ENT_QUOTES, 'UTF-8'));
+$department_name = trim(html_entity_decode(filterRequest('department_name'), ENT_QUOTES, 'UTF-8'));
+$study_mode = trim(html_entity_decode(filterRequest('study_mode'), ENT_QUOTES, 'UTF-8'));
+$subject_name = trim(html_entity_decode(filterRequest('subject_name'), ENT_QUOTES, 'UTF-8'));
+$teacher_id = trim(filterRequest('teacher_id'));
 
-// Preparing the SQL statement for updating data
-$stmt = $conn->prepare("UPDATE `allocate_teacher_subject` 
-                        SET `status` = 'pending' 
-                        WHERE `department_name` = ? 
-                        AND `class_name` = ? 
-                        AND `study_mode` = ? 
-                        AND `subject_name` = ?");
+// Validate required fields
+if (empty($class_name) || empty($department_name) || empty($study_mode) || empty($subject_name) || empty($teacher_id)) {
+    echo json_encode(["status" => "fail", "message" => "All fields including teacher_id are required"]);
+    exit;
+}
 
-// Executing the prepared statement with the provided values
-$stmt->execute(array( $department_name, $class_name, $study_mode, $subject_name));
+try {
+    // First, get the teacher's auto-increment ID from the teacher_id (varchar)
+    $teacherAutoIdSql = "SELECT id FROM Teachers WHERE teacher_id = ?";
+    $teacherStmt = $conn->prepare($teacherAutoIdSql);
+    $teacherStmt->execute([$teacher_id]);
+    $teacher = $teacherStmt->fetch(PDO::FETCH_ASSOC);
 
-// Checking the number of affected rows
-$count = $stmt->rowCount();
+    if (!$teacher) {
+        echo json_encode(["status" => "fail", "message" => "Teacher not found with teacher_id: " . $teacher_id]);
+        exit;
+    }
 
-// Returning the status as a JSON response
-if ($count > 0) {
-    echo json_encode(array("status" => "success"));
-} else {
-    echo json_encode(array("status" => "fail")); 
+    $teacherAutoId = $teacher['id'];
+
+    // Update the status from 'approved' to 'pending'
+    $updateSql = "UPDATE teacher_subject_allocation tsa
+    INNER JOIN classes c ON tsa.class_id = c.id
+    INNER JOIN departments d ON c.department_id = d.id
+    INNER JOIN subjects s ON tsa.subject_id = s.id
+    SET tsa.status = 'pending'
+    WHERE TRIM(LOWER(c.class_name)) = TRIM(LOWER(?)) 
+    AND TRIM(LOWER(d.department_name)) = TRIM(LOWER(?)) 
+    AND TRIM(LOWER(c.study_mode)) = TRIM(LOWER(?)) 
+    AND TRIM(LOWER(s.subject_name)) = TRIM(LOWER(?))
+    AND tsa.teacher_id = ?
+    AND tsa.status = 'approved'";
+
+    $updateStmt = $conn->prepare($updateSql);
+    $result = $updateStmt->execute([$class_name, $department_name, $study_mode, $subject_name, $teacherAutoId]);
+
+    if ($result && $updateStmt->rowCount() > 0) {
+        echo json_encode(["status" => "success", "message" => "Class status changed from approved to pending successfully"]);
+    } else {
+        echo json_encode(["status" => "fail", "message" => "No approved class found to update or already pending"]);
+    }
+
+} catch (PDOException $e) {
+    echo json_encode(["status" => "fail", "message" => "Database error: " . $e->getMessage()]);
 }
 ?>
