@@ -2,29 +2,105 @@
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
+header("Content-Type: application/json");
+
 include "conn.php";
 
-// Get the POST parameters
-$class_name = $_POST['class_name'] ?? '';
-$department_name = $_POST['department_name'] ?? '';
-$study_mode = $_POST['study_mode'] ?? '';
-$subject_name = $_POST['subject_name'] ?? '';
+// Get the parameters (can be GET or POST)
+$class_name = trim(filterRequest('class_name'));
+$department_name = trim(filterRequest('department_name'));
+$study_mode = trim(filterRequest('study_mode'));
+$subject_name = trim(filterRequest('subject_name'));
 
 try {
-    // First, get total sessions for this subject
-    $sessionQuery = "SELECT COUNT(*) as total_sessions 
-                     FROM submit_session 
-                     WHERE class_name = ? AND department_name = ? AND study_mode = ? AND subject_name = ?";
-    $stmt = $conn->prepare($sessionQuery);
-    $stmt->execute([$class_name, $department_name, $study_mode, $subject_name]);
-    $totalSessions = $stmt->fetch(PDO::FETCH_ASSOC)['total_sessions'];
+    // Validate required parameters
+    if (empty($class_name) || empty($department_name) || empty($study_mode) || empty($subject_name)) {
+        throw new Exception('Missing required parameters: class_name, department_name, study_mode, subject_name');
+    }
+
+    // Get class information using the provided parameters
+    $classQuery = "SELECT c.id as class_id, c.class_name, c.study_mode, c.semester, c.academic_year, 
+                          d.department_name, f.faculty_name
+                   FROM classes c 
+                   JOIN departments d ON c.department_id = d.id 
+                   JOIN faculties f ON c.faculty_id = f.id
+                   WHERE TRIM(LOWER(c.class_name)) = TRIM(LOWER(?)) 
+                   AND TRIM(LOWER(d.department_name)) = TRIM(LOWER(?)) 
+                   AND TRIM(LOWER(c.study_mode)) = TRIM(LOWER(?))";
+    
+    $stmt = $conn->prepare($classQuery);
+    $stmt->execute([$class_name, $department_name, $study_mode]);
+    $classInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$classInfo) {
+        throw new Exception('Class not found with the provided criteria');
+    }
+
+    $class_id = $classInfo['class_id'];
+
+    // Get subject_class_id for this subject and class
+    $subjectClassQuery = "SELECT s.id as subject_id, s.subject_name
+                         FROM subjects s
+                         WHERE TRIM(LOWER(s.subject_name)) = TRIM(LOWER(?))";
+    
+    $stmt = $conn->prepare($subjectClassQuery);
+    $stmt->execute([$subject_name]);
+    $subjectInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$subjectInfo) {
+        throw new Exception('Subject not found: ' . $subject_name);
+    }
+
+    $subject_id = $subjectInfo['subject_id'];
+
+    // Get actual total sessions from attendance_sessions table
+    $sessionsQuery = "SELECT COUNT(*) as total_sessions
+                     FROM attendance_sessions 
+                     WHERE class_id = ? AND subject_class_id = ?";
+    
+    $stmt = $conn->prepare($sessionsQuery);
+    $stmt->execute([$class_id, $subject_id]);
+    $sessionsResult = $stmt->fetch(PDO::FETCH_ASSOC);
+    $totalSessions = (int)$sessionsResult['total_sessions'];
+
+    // If no sessions found, set to 0 (no attendance taken yet)
+    if ($totalSessions === 0) {
+        // Get student count for empty report
+        $studentCountQuery = "SELECT COUNT(*) as student_count FROM students WHERE class_id = ? AND status = 'active'";
+        $stmt = $conn->prepare($studentCountQuery);
+        $stmt->execute([$class_id]);
+        $studentCount = (int)$stmt->fetch(PDO::FETCH_ASSOC)['student_count'];
+
+        // Return empty report with message
+        echo json_encode([
+            'status' => 'success',
+            'subject_info' => [
+                'subject_name' => $subject_name,
+                'class_name' => $classInfo['class_name'],
+                'department_name' => $classInfo['department_name'],
+                'study_mode' => $classInfo['study_mode'],
+                'semester' => $classInfo['semester'],
+                'academic_year' => $classInfo['academic_year'],
+                'faculty_name' => $classInfo['faculty_name'],
+                'total_sessions' => 0,
+                'class_attendance_rate' => 100.0,
+                'total_students' => $studentCount,
+                'total_absences' => 0
+            ],
+            'students' => [],
+            'message' => 'No attendance sessions found for this subject yet.'
+        ]);
+        exit();
+    }
 
     // Get all students in the class
-    $studentsQuery = "SELECT student_id, student_name 
-                      FROM students 
-                      WHERE class_name = ? AND department_name = ? AND study_mode = ?";
+    $studentsQuery = "SELECT id, student_id, full_name as student_name 
+                     FROM students 
+                     WHERE class_id = ? AND status = 'active'
+                     ORDER BY student_id";
+    
     $stmt = $conn->prepare($studentsQuery);
-    $stmt->execute([$class_name, $department_name, $study_mode]);
+    $stmt->execute([$class_id]);
     $allStudents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $reportData = [];
@@ -32,29 +108,32 @@ try {
     $totalPossibleAttendances = 0;
 
     foreach ($allStudents as $student) {
-        $studentId = $student['student_id'];
+        $internal_student_id = $student['id'];
+        $student_id = $student['student_id'];
         $studentName = $student['student_name'];
 
         // Count absences for this student in this subject
         $absenceQuery = "SELECT COUNT(*) as absence_count 
-                         FROM absents 
-                         WHERE student_id = ? AND class_name = ? AND department_name = ? AND study_mode = ? AND subject_name = ?";
+                        FROM absences 
+                        WHERE student_id = ? AND class_id = ? AND subject_class_id = ?";
+        
         $stmt = $conn->prepare($absenceQuery);
-        $stmt->execute([$studentId, $class_name, $department_name, $study_mode, $subject_name]);
-        $absenceCount = $stmt->fetch(PDO::FETCH_ASSOC)['absence_count'];
+        $stmt->execute([$internal_student_id, $class_id, $subject_id]);
+        $absenceCount = (int)$stmt->fetch(PDO::FETCH_ASSOC)['absence_count'];
 
-        // Get absence dates for this student in this subject
-        $datesQuery = "SELECT absent_date, statuses, excuses 
-                       FROM absents 
-                       WHERE student_id = ? AND class_name = ? AND department_name = ? AND study_mode = ? AND subject_name = ?
-                       ORDER BY absent_date DESC";
+        // Get absence dates with excuses for this student in this subject
+        $datesQuery = "SELECT absence_date as absent_date, excuse as excuses
+                      FROM absences 
+                      WHERE student_id = ? AND class_id = ? AND subject_class_id = ?
+                      ORDER BY absence_date DESC";
+        
         $stmt = $conn->prepare($datesQuery);
-        $stmt->execute([$studentId, $class_name, $department_name, $study_mode, $subject_name]);
+        $stmt->execute([$internal_student_id, $class_id, $subject_id]);
         $absenceDates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Calculate attendance rate
         $attendanceRate = $totalSessions > 0 ? (($totalSessions - $absenceCount) / $totalSessions) * 100 : 100;
-        
+
         // Determine status
         $status = 'Good';
         $statusColor = 'green';
@@ -67,7 +146,7 @@ try {
         }
 
         $studentData = [
-            'student_id' => $studentId,
+            'student_id' => $student_id,
             'student_name' => $studentName,
             'absences' => $absenceCount,
             'total_sessions' => $totalSessions,
@@ -92,14 +171,16 @@ try {
     });
 
     // Return comprehensive report
-    header('Content-Type: application/json');
     echo json_encode([
         'status' => 'success',
         'subject_info' => [
             'subject_name' => $subject_name,
-            'class_name' => $class_name,
-            'department_name' => $department_name,
-            'study_mode' => $study_mode,
+            'class_name' => $classInfo['class_name'],
+            'department_name' => $classInfo['department_name'],
+            'study_mode' => $classInfo['study_mode'],
+            'semester' => $classInfo['semester'],
+            'academic_year' => $classInfo['academic_year'],
+            'faculty_name' => $classInfo['faculty_name'],
             'total_sessions' => $totalSessions,
             'class_attendance_rate' => round($classAttendanceRate, 1),
             'total_students' => count($allStudents),
@@ -109,7 +190,6 @@ try {
     ]);
 
 } catch (Exception $e) {
-    header('Content-Type: application/json');
     echo json_encode([
         'status' => 'fail',
         'message' => 'Error: ' . $e->getMessage()

@@ -2,30 +2,37 @@
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
+header("Content-Type: application/json");
 
-include "conn.php";
+include_once "conn.php"; // This already includes function.php, so we don't need to include it again
 
-// attendanceproject1
+try {
+    $username = filterRequest('username');
+    $password = filterRequest('password');
 
+    // Validate input
+    if (empty($username) || empty($password)) {
+        echo json_encode(array("status" => "fail", "message" => "Username and password are required"));
+        exit();
+    }
 
-$username = filterRequest('username');
-$password = filterRequest('password');
+    // Prepare and execute the SQL statement to get teacher by username
+    $stmt = $conn->prepare("SELECT * FROM `teachers` WHERE `username` = ?");
+    $stmt->execute(array($username));
 
-// Prepare and execute the SQL statement
-$stmt = $conn->prepare("SELECT * FROM `teachertable` WHERE `username` = ? AND `password` = ?");
-$stmt->execute(array($username, $password));
+    // Fetch results as associative array
+    $teacher = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Fetch results as associative array
-$results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Check if teacher exists and verify password
+    if ($teacher && password_verify($password, $teacher['password'])) {
+        // Remove password from response for security
+        unset($teacher['password']);
+        echo json_encode(array("status" => "success", "teacher" => $teacher));
+    } else {
+        echo json_encode(array("status" => "fail", "message" => "Invalid username or password"));
+    }
 
-// Check if any results were found and respond accordingly
-if ($results) {
-    echo json_encode(array("status" => "success", "users" => $results));
-} else {
-    echo json_encode(array("status" => "fail", "message" => "No users found"));
+} catch (Exception $e) {
+    echo json_encode(array("status" => "error", "message" => "Database error: " . $e->getMessage()));
 }
-
 ?>
