@@ -1,77 +1,85 @@
 <?php
-session_start();
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
+
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
+// Clear any unexpected output from includes
+ob_clean();
+
+// Set content type to JSON
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!empty($_POST['subject_name']) && !empty($_POST['department_name']) && !empty($_POST['id']) && !empty($_POST['faculty_name']) && !empty($_POST['original_subject_name'])) {
-        $newSubjectName = $_POST['subject_name'];
-        $departmentName = $_POST['department_name'];
-        $id = $_POST['id'];
-        $facultyName = $_POST['faculty_name'];
-        $originalSubjectName = $_POST['original_subject_name'];
-
-        try {
-            $conn->beginTransaction();
-
-            // Check if the new subject name already exists in the 'subjects' table
-            $stmt_check = $conn->prepare("SELECT id FROM subjects WHERE subject_name = :subject_name AND department_name = :department_name AND faculty_name = :faculty_name AND id != :id");
-            $stmt_check->execute([
-                ':subject_name' => $newSubjectName,
-                ':department_name' => $departmentName,
-                ':faculty_name' => $facultyName,
-                ':id' => $id
-            ]);
-
-            if ($stmt_check->rowCount() > 0) {
-                echo json_encode(['status' => 'exists']);
-                exit; // Stop further execution
-            }
-
-            // Update the 'subjects' table
-            $stmt = $conn->prepare("UPDATE subjects SET subject_name = :subject_name, department_name = :department_name, faculty_name = :faculty_name WHERE id = :id");
-            if ($stmt->execute([
-                ':subject_name' => $newSubjectName,
-                ':department_name' => $departmentName,
-                ':faculty_name' => $facultyName,
-                ':id' => $id
-            ])) {
-                // Update the 'subject_class' table
-                $stmt_update_subject_class = $conn->prepare("UPDATE subject_class SET subject_name = :subject_name WHERE subject_name = :original_subject_name AND department_name = :department_name AND faculty_name = :faculty_name");
-                $stmt_update_subject_class->execute([
-                    ':subject_name' => $newSubjectName,
-                    ':original_subject_name' => $originalSubjectName,
-                    ':department_name' => $departmentName,
-                    ':faculty_name' => $facultyName
-                ]);
-
-                // Update the 'allocate_teacher_subject' table
-                $stmt_update_allocate_teacher = $conn->prepare("UPDATE allocate_teacher_subject SET subject_name = :subject_name WHERE subject_name = :original_subject_name AND department_name = :department_name AND faculty_name = :faculty_name");
-                if ($stmt_update_allocate_teacher->execute([
-                    ':subject_name' => $newSubjectName,
-                    ':original_subject_name' => $originalSubjectName,
-                    ':department_name' => $departmentName,
-                    ':faculty_name' => $facultyName
-                ])) {
-                    $conn->commit();
-                    echo json_encode(['status' => 'success']);
-                } else {
-                    // Rollback and show error if updating allocate_teacher_subject fails
-                    $conn->rollBack();
-                    echo json_encode(['status' => 'error', 'message' => 'Failed to update allocate_teacher_subject.']);
-                }
-            } else {
-                echo json_encode(['status' => 'error', 'message' => 'Failed to update subject.']);
-            }
-        } catch (Exception $e) {
-            $conn->rollBack();
-            echo json_encode(['status' => 'error', 'message' => 'Error occurred: ' . $e->getMessage()]);
-        }
-    } else {
-        echo json_encode(['status' => 'error', 'message' => 'Required fields are missing.']);
+try {
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
-} else {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid request method.']);
+
+    $faculty_id = $sessionInfo['faculty_id'];
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    $subject_id = trim($_POST['id'] ?? '');
+    $subject_name = trim($_POST['subject_name'] ?? '');
+
+    // Validate input
+    if (empty($subject_id) || empty($subject_name)) {
+        throw new Exception("Subject ID and name are required");
+    }
+
+    // Check if subject exists and belongs to this faculty
+    $check_sql = "SELECT department_id FROM subjects WHERE id = ? AND faculty_id = ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->execute([$subject_id, $faculty_id]);
+    $subject_data = $check_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$subject_data) {
+        throw new Exception("Subject not found or access denied");
+    }
+
+    $department_id = $subject_data['department_id'];
+
+    // Check if subject name already exists for another subject in the same department
+    $check_name_sql = "SELECT id FROM subjects WHERE subject_name = ? AND department_id = ? AND faculty_id = ? AND id != ?";
+    $check_name_stmt = $conn->prepare($check_name_sql);
+    $check_name_stmt->execute([$subject_name, $department_id, $faculty_id, $subject_id]);
+
+    if ($check_name_stmt->rowCount() > 0) {
+        echo json_encode(["status" => "exists", "message" => "Subject name already exists in this department"]);
+        exit();
+    }
+
+    // Update subject
+    $sql = "UPDATE subjects SET subject_name = ? WHERE id = ? AND faculty_id = ?";
+    $stmt = $conn->prepare($sql);
+
+    if (!$stmt->execute([$subject_name, $subject_id, $faculty_id])) {
+        $errorInfo = $stmt->errorInfo();
+        throw new Exception("Database error: " . $errorInfo[2]);
+    }
+
+    ob_clean();
+    echo json_encode(["status" => "success", "message" => "Subject updated successfully"]);
+
+} catch (Exception $e) {
+    ob_clean();
+    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode(["status" => "error", "message" => "Database error: " . $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

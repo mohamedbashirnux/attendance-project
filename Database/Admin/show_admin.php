@@ -1,35 +1,28 @@
 <?php
+header('Content-Type: application/json');
+
 include "../../connection/connect.php";
 
-$output = '';
-
 try {
-    $sql = "SELECT username, password FROM admintable";
-    $stmt = $conn->query($sql);
+    $sql = "SELECT id, username FROM super_admin ORDER BY id ASC";
+    $stmt = $conn->prepare($sql);
+    $stmt->execute();
 
+    $data = [];
     if ($stmt->rowCount() > 0) {
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $username = htmlspecialchars($row['username']);
-            $password = htmlspecialchars($row['password']);
-            $output .= "
-                <tr>
-                    <td>{$username}</td>
-                    <td>{$password}</td>
-                    <td class='text-end'>
-                        <button class='btn btn-sm btn-warning' onclick='editAdmin(\"{$username}\", \"{$password}\")'>Edit</button>
-                        <button class='btn btn-sm btn-danger' onclick='deleteAdmin(\"{$username}\")'>Delete</button>
-                    </td>
-                </tr>
-            ";
+            $data[] = [
+                'id' => $row['id'],
+                'username' => $row['username']
+            ];
         }
-    } else {
-        $output .= "<tr><td colspan='3'>No results found</td></tr>";
     }
+
+    echo json_encode(['success' => true, 'admins' => $data]);
+
 } catch (PDOException $e) {
-    $output = "<tr><td colspan='3'>Error: " . htmlspecialchars($e->getMessage()) . "</td></tr>";
+    echo json_encode(['success' => false, 'message' => 'Error fetching admins: ' . $e->getMessage()]);
 }
 
-$conn = null; // Close the connection
-
-echo $output;
+$conn = null;
 ?>

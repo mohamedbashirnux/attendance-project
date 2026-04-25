@@ -16,7 +16,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <div class="menu-inner-shadow"></div>
     <ul class="menu-inner py-1">
         <li class="menu-item <?php echo $current_page == 'dashboard.php' ? 'active' : ''; ?>">
-            <a href="/attendanceproject1/Account_users/dashboard.php" class="menu-link">
+            <a href="dashboard.php" class="menu-link">
                 <i class="menu-icon tf-icons bx bx-home-circle"></i>
                 <div data-i18n="Analytics">Dashboard</div>
             </a>
@@ -24,39 +24,39 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li class="menu-header small text-uppercase">
             <span class="menu-header-text">Sections</span>
         </li>
-        <li class="menu-item <?php echo in_array($current_page, ['department.php', 'Classes.php', 'Teacerpage.php', 'selection_class.php', 'before_sub_class.php', 'selection_teacher.php']) ? 'active' : ''; ?>">
+        <li class="menu-item <?php echo in_array($current_page, ['department.php', 'Classes.php', 'Teacerpage.php', 'selection_class.php', 'subjects.php', 'before_sub_class.php', 'selection_teacher.php']) ? 'active' : ''; ?>">
             <a href="javascript:void(0);" class="menu-link menu-toggle">
                 <i class="menu-icon tf-icons bx bx-lock-open-alt"></i>
                 <div data-i18n="Authentications">Academic</div>
             </a>
             <ul class="menu-sub">
                 <li class="menu-item <?php echo $current_page == 'department.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/department.php" class="menu-link">
+                    <a href="department.php" class="menu-link">
                         <div data-i18n="Basic">Department</div>
                     </a>
                 </li>
                 <li class="menu-item <?php echo $current_page == 'Classes.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/Classes.php" class="menu-link">
+                    <a href="Classes.php" class="menu-link">
                         <div data-i18n="Notifications">Classes</div>
                     </a>
                 </li>
                 <li class="menu-item <?php echo $current_page == 'Teacerpage.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/Teacerpage.php" class="menu-link">
+                    <a href="Teacerpage.php" class="menu-link">
                         <div data-i18n="Notifications">Teacher</div>
                     </a>
                 </li>
-                <li class="menu-item <?php echo $current_page == 'selection_class.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/selection_class.php" class="menu-link">
+                <li class="menu-item <?php echo in_array($current_page, ['selection_class.php', 'subjects.php']) ? 'active' : ''; ?>">
+                    <a href="selection_class.php" class="menu-link">
                         <div data-i18n="Notifications">Subjects</div>
                     </a>
                 </li>
                 <li class="menu-item <?php echo $current_page == 'before_sub_class.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/before_sub_class.php" class="menu-link">
+                    <a href="before_sub_class.php" class="menu-link">
                         <div data-i18n="Notifications">Subjects/class</div>
                     </a>
                 </li>
                 <li class="menu-item <?php echo $current_page == 'selection_teacher.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/selection_teacher.php" class="menu-link">
+                    <a href="selection_teacher.php" class="menu-link">
                         <div data-i18n="Notifications">Allocate teachers & students</div>
                     </a>
                 </li>
@@ -69,7 +69,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
             <ul class="menu-sub">
                 <li class="menu-item <?php echo $current_page == 'selection_student.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/selection_student.php" class="menu-link">
+                    <a href="selection_student.php" class="menu-link">
                         <div data-i18n="Basic">Manage Students</div>
                     </a>
                 </li>
@@ -83,27 +83,54 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
             <ul class="menu-sub">
                 <li class="menu-item <?php echo $current_page == 'selection_Absents.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/selection_Absents.php" class="menu-link">
+                    <a href="selection_Absents.php" class="menu-link">
                         <div data-i18n="Basic">Manage Absents</div>
                     </a>
                 </li>
             </ul>
-            <li class="menu-header small text-uppercase">
-            <span class="menu-header-text">Security</span>
-            
         </li>
-        <li class="menu-item <?php echo in_array($current_page, ['department.php', 'Classes.php', 'Teacerpage.php', 'selection_class.php', 'before_sub_class.php', 'selection_teacher.php']) ? 'active' : ''; ?>">
+        <li class="menu-header small text-uppercase">
+            <span class="menu-header-text">Analytics & Reports</span>
+        </li>
+        <li class="menu-item <?php echo $current_page == 'faculty_overview.php' ? 'active' : ''; ?>">
+            <a href="faculty_overview.php" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-bar-chart-alt-2"></i>
+                <div data-i18n="Faculty Overview">Faculty Overview</div>
+            </a>
+        </li>
+        <li class="menu-item <?php echo $current_page == 'attendance_analytics.php' ? 'active' : ''; ?>">
+            <a href="attendance_analytics.php" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-line-chart"></i>
+                <div data-i18n="Attendance Analytics">Attendance Analytics</div>
+            </a>
+        </li>
+        <li class="menu-item <?php echo $current_page == 'teacher_analytics.php' ? 'active' : ''; ?>">
+            <a href="teacher_analytics.php" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-user-check"></i>
+                <div data-i18n="Teacher Analytics">Teacher Analytics</div>
+            </a>
+        </li>
+        <li class="menu-header small text-uppercase">
+            <span class="menu-header-text">Security</span>
+        </li>
+        <li class="menu-item <?php echo in_array($current_page, ['time_table.php', 'selection_notification.php']) ? 'active' : ''; ?>">
             <a href="javascript:void(0);" class="menu-link menu-toggle">
                 <i class="menu-icon tf-icons bx bx-lock-open-alt"></i>
                 <div data-i18n="Authentications">Additional data</div>
             </a>
             <ul class="menu-sub">
-                <li class="menu-item <?php echo $current_page == 'department.php' ? 'active' : ''; ?>">
-                    <a href="/attendanceproject1/Account_users/time_table.php" class="menu-link">
+                <li class="menu-item <?php echo $current_page == 'time_table.php' ? 'active' : ''; ?>">
+                    <a href="time_table.php" class="menu-link">
                         <div data-i18n="Basic">add table class</div>
                     </a>
                 </li>
+                <li class="menu-item <?php echo $current_page == 'selection_notification.php' ? 'active' : ''; ?>">
+                    <a href="selection_notification.php" class="menu-link">
+                        <i class='bx bx-bell'></i>
+                        <div data-i18n="Basic">Send Notification</div>
+                    </a>
+                </li>
+            </ul>
         </li>
-        
     </ul>
 </aside>

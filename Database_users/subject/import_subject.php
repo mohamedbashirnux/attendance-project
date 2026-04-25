@@ -1,107 +1,162 @@
 <?php
+// CSV ONLY IMPORT - Simple subject names import
+error_reporting(0);
+ini_set('display_errors', 0);
+ob_start();
+
+include "../../Account_users/session_faculty.php";
 include "../../connection/connect.php";
 
-require('../../library/php-excel-reader/excel_reader2.php');
-require('../../library/SpreadsheetReader.php');
-
-$response = ['status' => 'error', 'message' => '', 'duplicates' => []];
+ob_clean();
+header('Content-Type: application/json');
 
 try {
-    // Check if the required form data and file are present
-    if (isset($_FILES['file']) && isset($_POST['department_name']) && isset($_POST['faculty'])) {
-        $department_name = trim($_POST['department_name']);
-        $faculty = trim($_POST['faculty']);
-
-        // Allowed MIME types for Excel files
-        $allowedMimes = [
-            'application/vnd.ms-excel', 
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/xls', 
-            'text/xlsx', 
-            'application/vnd.oasis.opendocument.spreadsheet'
-        ];
-
-        $fileType = $_FILES["file"]["type"];
-
-        // Ensure the uploaded file is an Excel file
-        if (in_array($fileType, $allowedMimes)) {
-            $uploadFilePath = '../../uploads/' . basename($_FILES['file']['name']);
-            if (move_uploaded_file($_FILES['file']['tmp_name'], $uploadFilePath)) {
-                $Reader = new SpreadsheetReader($uploadFilePath);
-                $Reader->ChangeSheet(0); // Use the first sheet
-
-                $count = 0;
-                $duplicates = [];
-                $insertSuccess = true;
-
-                // Prepare statements for duplicate check and insertion
-                $checkStmt = $conn->prepare("SELECT COUNT(*) FROM subjects WHERE LOWER(TRIM(subject_name)) = LOWER(TRIM(:subject_name)) AND department_name = :department_name");
-                $insertStmt = $conn->prepare("INSERT INTO subjects (subject_name, department_name, faculty_name) VALUES (:subject_name, :department_name, :faculty_name)");
-
-                $insertedSubjects = [];  // To track already inserted subjects from the file
-
-                foreach ($Reader as $Row) {
-                    $count++;
-
-                    // Get the first column (subject name) and ignore other columns if any
-                    $subjectName = isset($Row[0]) ? trim($Row[0]) : '';
-
-                    // Skip if the subject name is empty or contains only spaces
-                    if (empty($subjectName)) {
-                        continue;
-                    }
-
-                    // Check if subject already exists in the database (case-insensitive)
-                    $checkStmt->execute([':subject_name' => $subjectName, ':department_name' => $department_name]);
-                    $countExists = $checkStmt->fetchColumn();
-
-                    if ($countExists > 0) {
-                        $duplicates[] = $subjectName; // Add to duplicate list
-                        continue; // Skip to the next row if duplicate is found
-                    }
-
-                    // Check if the subject was already inserted in this file (case-insensitive)
-                    if (in_array(strtolower($subjectName), $insertedSubjects)) {
-                        $duplicates[] = $subjectName; // Add to duplicate list
-                        continue;
-                    }
-
-                    // Add the subject to the inserted tracker
-                    $insertedSubjects[] = strtolower($subjectName);
-
-                    // Insert new subject into the database
-                    $insertStmt->execute([
-                        ':subject_name' => $subjectName, 
-                        ':department_name' => $department_name, 
-                        ':faculty_name' => $faculty
-                    ]);
-                }
-
-                // Check if the import was successful
-                if ($insertSuccess) {
-                    $response['status'] = 'success';
-                    $response['message'] = 'Subjects imported successfully. Duplicates have been removed.';
-                    $response['duplicates'] = $duplicates;
-                } else {
-                    $response['message'] = 'An error occurred while importing subjects.';
-                }
-
-            } else {
-                $response['message'] = 'Failed to move uploaded file.';
-            }
-        } else {
-            $response['message'] = 'Only Excel files are allowed.';
-        }
-    } else {
-        $response['message'] = 'No file uploaded or missing department/faculty information.';
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
+
+    $faculty_id = $sessionInfo['faculty_id'];
+    $department_id = trim($_POST['department_id'] ?? '');
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    if (empty($department_id)) {
+        throw new Exception("Department ID is required");
+    }
+
+    // Verify department belongs to this faculty
+    $verify_sql = "SELECT id FROM departments WHERE id = ? AND faculty_id = ?";
+    $verify_stmt = $conn->prepare($verify_sql);
+    $verify_stmt->execute([$department_id, $faculty_id]);
+    
+    if ($verify_stmt->rowCount() === 0) {
+        throw new Exception("Invalid department selected");
+    }
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception("Please select a valid file");
+    }
+
+    $uploadedFile = $_FILES['file'];
+    $fileExtension = strtolower(pathinfo($uploadedFile['name'], PATHINFO_EXTENSION));
+
+    // ONLY ACCEPT CSV
+    if ($fileExtension !== 'csv') {
+        throw new Exception("Only CSV files are allowed! Please save your Excel as CSV first (File → Save As → CSV UTF-8)");
+    }
+
+    // Read CSV file
+    $handle = fopen($uploadedFile['tmp_name'], 'r');
+    if (!$handle) {
+        throw new Exception("Could not open CSV file");
+    }
+
+    $successCount = 0;
+    $errorCount = 0;
+    $duplicates = [];
+    $errors = [];
+    $rowNumber = 0;
+
+    while (($row = fgetcsv($handle, 1000, ',')) !== FALSE) {
+        $rowNumber++;
+        
+        // Skip empty rows
+        if (empty(array_filter($row))) {
+            continue;
+        }
+
+        // Get subject name from first column and remove BOM
+        $subject_name = trim(preg_replace('/^\x{FEFF}/u', '', $row[0] ?? ''));
+
+        // Validate subject name
+        if (empty($subject_name)) {
+            $errors[] = "Row $rowNumber: Subject name is empty";
+            $errorCount++;
+            continue;
+        }
+
+        try {
+            // Check if subject already exists in this department
+            $check_sql = "SELECT id FROM subjects WHERE subject_name = ? AND department_id = ? AND faculty_id = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->execute([$subject_name, $department_id, $faculty_id]);
+            
+            if ($check_stmt->rowCount() > 0) {
+                $duplicates[] = $subject_name;
+                $errorCount++;
+                continue;
+            }
+
+            // Insert subject
+            $insert_sql = "INSERT INTO subjects (faculty_id, department_id, subject_name) VALUES (?, ?, ?)";
+            $insert_stmt = $conn->prepare($insert_sql);
+            
+            if ($insert_stmt->execute([$faculty_id, $department_id, $subject_name])) {
+                $successCount++;
+            } else {
+                $errors[] = "Row $rowNumber: Failed to insert subject '$subject_name'";
+                $errorCount++;
+            }
+
+        } catch (PDOException $e) {
+            $errors[] = "Row $rowNumber: Database error - " . $e->getMessage();
+            $errorCount++;
+        }
+    }
+    fclose($handle);
+
+    // Prepare response message
+    $message = "";
+    if ($successCount > 0) {
+        $message = "$successCount subject" . ($successCount > 1 ? "s" : "") . " imported successfully";
+    }
+    if ($errorCount > 0) {
+        if ($successCount > 0) {
+            $message .= ". ";
+        }
+        $message .= "$errorCount skipped";
+        if (count($duplicates) > 0) {
+            $message .= " (" . count($duplicates) . " duplicate" . (count($duplicates) > 1 ? "s" : "") . ")";
+        }
+    }
+    if (empty($message)) {
+        $message = "No subjects imported";
+    }
+
+    ob_clean();
+    echo json_encode([
+        "status" => $successCount > 0 ? "success" : "error",
+        "message" => $message,
+        "success_count" => $successCount,
+        "error_count" => $errorCount,
+        "duplicates" => $duplicates,
+        "errors" => $errors
+    ]);
+    exit();
+
 } catch (Exception $e) {
-    // Log any exceptions that occur
-    $response['message'] = $e->getMessage();
+    ob_clean();
+    echo json_encode([
+        "status" => "error",
+        "message" => $e->getMessage()
+    ]);
+    exit();
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode([
+        "status" => "error",
+        "message" => "Database error: " . $e->getMessage()
+    ]);
+    exit();
+} catch (Error $e) {
+    ob_clean();
+    echo json_encode([
+        "status" => "error",
+        "message" => "System error: " . $e->getMessage()
+    ]);
+    exit();
 }
-
-$conn = null;
-
-// Send the response as JSON
-echo json_encode($response);
 ?>

@@ -1,47 +1,71 @@
 <?php
-session_start();
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
 
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
+// Clear any unexpected output from includes
+ob_clean();
+
+// Set content type to JSON
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!empty($_POST['id']) && !empty($_POST['subject_name']) && !empty($_POST['department_name'])) {
-        $id = $_POST['id'];
-        $subject_name = $_POST['subject_name'];
-        $department_name = $_POST['department_name'];
-
-        try {
-            $conn->beginTransaction();
-
-            // Prepare and execute deletion from `subjects`
-            $stmt = $conn->prepare("DELETE FROM subjects WHERE id = :id");
-            if (!$stmt->execute([':id' => $id])) {
-                throw new Exception('Failed to delete from subjects');
-            }
-
-            // Prepare and execute deletion from `allocate_teacher_subject`
-            $stmt1 = $conn->prepare("DELETE FROM allocate_teacher_subject WHERE subject_name = :subject_name AND department_name = :department_name");
-            if (!$stmt1->execute([':subject_name' => $subject_name, ':department_name' => $department_name])) {
-                throw new Exception('Failed to delete from allocate_teacher_subject');
-            }
-
-            // Prepare and execute deletion from `subject_class`
-            $stmt2 = $conn->prepare("DELETE FROM subject_class WHERE subject_name = :subject_name AND department_name = :department_name");
-            if (!$stmt2->execute([':subject_name' => $subject_name, ':department_name' => $department_name])) {
-                throw new Exception('Failed to delete from subject_class');
-            }
-
-            $conn->commit();
-            echo json_encode(['status' => 'success']);
-        } catch (Exception $e) {
-            $conn->rollBack();
-            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
-        }
-    } else {
-        echo json_encode(['status' => 'error', 'message' => 'Required fields are missing.']);
+try {
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
-} else {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid request method.']);
+
+    $faculty_id = $sessionInfo['faculty_id'];
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    $subject_id = trim($_POST['id'] ?? '');
+
+    // Validate input
+    if (empty($subject_id)) {
+        throw new Exception("Subject ID is required");
+    }
+
+    // Check if subject exists and belongs to this faculty
+    $check_sql = "SELECT id FROM subjects WHERE id = ? AND faculty_id = ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->execute([$subject_id, $faculty_id]);
+    
+    if ($check_stmt->rowCount() === 0) {
+        throw new Exception("Subject not found or access denied");
+    }
+
+    // Delete subject
+    $sql = "DELETE FROM subjects WHERE id = ? AND faculty_id = ?";
+    $stmt = $conn->prepare($sql);
+
+    if (!$stmt->execute([$subject_id, $faculty_id])) {
+        $errorInfo = $stmt->errorInfo();
+        throw new Exception("Database error: " . $errorInfo[2]);
+    }
+
+    ob_clean();
+    echo json_encode(["status" => "success", "message" => "Subject deleted successfully"]);
+
+} catch (Exception $e) {
+    ob_clean();
+    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode(["status" => "error", "message" => "Database error: " . $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

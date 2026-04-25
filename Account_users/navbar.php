@@ -1,7 +1,8 @@
 <?php
-
-// Fetch the faculty from session
-$faculty = $_SESSION['faculty'] ?? '';
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$username = $sessionInfo['username'];
 ?>
 
 <style>

@@ -6,7 +6,7 @@ include "../../connection/connect.php"; // Assuming this file is updated for PDO
 
 try {
     // SQL query to fetch faculty members
-    $sql = "SELECT * FROM facultytable";
+    $sql = "SELECT * FROM faculty ORDER BY id ASC";
 
     // Execute the query
     $stmt = $conn->prepare($sql);
@@ -17,7 +17,7 @@ try {
     if ($stmt->rowCount() > 0) {
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $data[] = [
-                'fid' => $row['fid'],
+                'fid' => $row['id'],
                 'faculty_name' => $row['faculty_name']
             ];
         }

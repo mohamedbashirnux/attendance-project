@@ -1,10 +1,11 @@
 <?php
-session_start();
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-$faculty = $_SESSION['faculty']; // Asuming 'faculty' is stored in the session when the user logs in
+// Include the faculty session management
+include 'session_faculty.php';
+
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 ?>
 <!DOCTYPE html>
 <html lang="en" class="light-style layout-menu-fixed" dir="ltr" data-theme="theme-default" data-assets-path="../assets/" data-template="vertical-menu-template-free">
@@ -70,7 +71,7 @@ $faculty = $_SESSION['faculty']; // Asuming 'faculty' is stored in the session w
                 <!-- Content Wrapper -->
                 <div class="content-wrapper">
                     <div class="container-xxl flex-grow-1 container-p-y">
-                        <h4 class="fw-bold py-3 mb-4">Select the Class Before Going to Subjects</h4>
+                        <h4 class="fw-bold py-3 mb-4">Select Department to Manage Subjects</h4>
 
                         <!-- Form Section -->
                         <div class="card">
@@ -79,7 +80,7 @@ $faculty = $_SESSION['faculty']; // Asuming 'faculty' is stored in the session w
                                     <div class="row">
                                         <div class="col-md-6 mb-3">
                                             <label for="departmentSelect" class="form-label">Department</label>
-                                            <select class="form-select" id="departmentSelect" name="department_name" required>
+                                            <select class="form-select" id="departmentSelect" name="department_id" required>
                                                 <option value="" disabled selected>Choose department</option>
                                                 <!-- Options populated dynamically -->
                                             </select>
@@ -87,12 +88,13 @@ $faculty = $_SESSION['faculty']; // Asuming 'faculty' is stored in the session w
                                         
                                         <div class="col-md-6 mb-3">
                                             <label for="faculty" class="form-label">Faculty</label>
-                                            <input type="text" class="form-control" id="faculty" name="faculty" readonly value="<?php echo $faculty; ?>">
+                                            <input type="text" class="form-control" id="faculty" name="faculty" readonly value="<?php echo htmlspecialchars($faculty); ?>">
+                                            <input type="hidden" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
                                         </div>
                                     </div>
                                     <div class="row">
                                         <div class="col-12 text-center">
-                                            <button type="submit" class="btn btn-primary">Go to Class</button>
+                                            <button type="submit" class="btn btn-primary">Go to Subjects</button>
                                         </div>
                                     </div>
                                 </form>
@@ -120,57 +122,43 @@ $faculty = $_SESSION['faculty']; // Asuming 'faculty' is stored in the session w
     <!-- Page JS - Implement your dynamic form logic here -->
     <script>
     $(document).ready(function() {
-        // Populate departments dropdown on page load
+        console.log('Page loaded, fetching departments...');
+        
+        // Load departments for this faculty
         $.ajax({
-            url: '../Database_users/subject/fetch_departments.php',
+            url: '../Database_users/subject/get_departments.php',
             type: 'GET',
-            success: function(data) {
-                $('#departmentSelect').html('<option value="" disabled selected>Choose department</option>' + data);
+            dataType: 'json',
+            success: function(response) {
+                console.log('Response:', response);
+                if (response.status === 'success' && response.departments) {
+                    var departments = response.departments;
+                    console.log('Departments found:', departments);
+                    
+                    if (departments.length > 0) {
+                        var departmentOptions = '<option value="" disabled selected>Choose department</option>';
+                        departments.forEach(function(department) {
+                            departmentOptions += '<option value="' + department.id + '">' + department.department_name + '</option>';
+                        });
+                        $('#departmentSelect').html(departmentOptions);
+                        console.log('Departments loaded successfully');
+                    } else {
+                        $('#departmentSelect').html('<option value="" disabled selected>No departments found for your faculty</option>');
+                        console.log('No departments found for this faculty');
+                    }
+                } else {
+                    console.error('Error in response:', response);
+                    $('#departmentSelect').html('<option value="" disabled selected>Error: ' + (response.message || 'Unknown error') + '</option>');
+                }
             },
             error: function(xhr, status, error) {
-                console.error("Error fetching departments:", error);
+                console.error('AJAX Error:', status, '-', error);
+                console.error('Response text:', xhr.responseText);
+                $('#departmentSelect').html('<option value="" disabled selected>Error loading departments</option>');
             }
         });
-
-        // Handle change in department selection
-        $('#departmentSelect').change(function() {
-            var departmentName = $(this).val();
-            // Fetch classes based on selected department
-            $.ajax({
-                url: '../Database_users/subject/fetch_classes.php',
-                type: 'GET',
-                data: { department_name: departmentName },
-                success: function(data) {
-                    $('#classSelect').html('<option value="" disabled selected>Choose a class</option>' + data);
-                    // Clear study mode when department changes
-                    $('#studyMode').html('<option value="" disabled selected>Choose study mode</option>'); // Clear study mode dropdown
-                },
-                error: function(xhr, status, error) {
-                    console.error("Error fetching classes:", error);
-                }
-            });
-        });
-
-        // Handle change in class selection
-        $('#classSelect').change(function() {
-            var className = $(this).val();
-            var departmentName = $('#departmentSelect').val(); // Get selected department
-            var facultyName = '<?php echo $faculty; ?>'; // Assuming $faculty is defined in your PHP context
-            // Fetch study modes based on selected class and department
-            $.ajax({
-                url: '../Database_users/subject/fetch_study_mode.php',
-                type: 'GET',
-                data: { department_name: departmentName, class_name: className, faculty_name: facultyName },
-                success: function(data) {
-                    $('#studyMode').html(data); // Populate study mode dropdown
-                },
-                error: function(xhr, status, error) {
-                    console.error("Error fetching study modes:", error);
-                }
-            });
-        });
     });
-</script>
+    </script>
 
 </body>
 </html>

@@ -9,7 +9,7 @@ try {
     $facultyName = $_POST['facultyName'];
 
     // Check if faculty already exists
-    $checkSql = "SELECT * FROM facultytable WHERE faculty_name = :facultyName";
+    $checkSql = "SELECT * FROM faculty WHERE faculty_name = :facultyName";
     $stmt = $conn->prepare($checkSql);
     $stmt->bindParam(':facultyName', $facultyName);
     $stmt->execute();
@@ -21,7 +21,7 @@ try {
     }
 
     // Insert new faculty
-    $insertSql = "INSERT INTO facultytable (faculty_name) VALUES (:facultyName)";
+    $insertSql = "INSERT INTO faculty (faculty_name) VALUES (:facultyName)";
     $stmt = $conn->prepare($insertSql);
     $stmt->bindParam(':facultyName', $facultyName);
     

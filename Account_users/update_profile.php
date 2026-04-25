@@ -1,67 +1,73 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-// Check if user is logged in
-if (!isset($_SESSION['faculty'])) {
-    header("Location: login.php");
+// Get current user info
+$currentUser = getCurrentFacultyUser();
+$sessionInfo = getSessionInfo();
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $newUsername = trim($_POST['username']);
+    $currentPassword = $_POST['currentPassword'];
+    $newPassword = trim($_POST['password']);
+    
+    $response = ['success' => false, 'message' => ''];
+    
+    try {
+        // Verify current password
+        if (!password_verify($currentPassword, $currentUser['password'])) {
+            $response['message'] = 'Current password is incorrect.';
+            echo json_encode($response);
+            exit();
+        }
+        
+        // Check if username already exists (excluding current user)
+        $stmt = $conn->prepare("SELECT id FROM faculty_users WHERE username = :username AND id != :current_id");
+        $stmt->bindParam(':username', $newUsername);
+        $stmt->bindParam(':current_id', $sessionInfo['faculty_user_id']);
+        $stmt->execute();
+        
+        if ($stmt->rowCount() > 0) {
+            $response['message'] = 'Username already exists. Please choose a different username.';
+            echo json_encode($response);
+            exit();
+        }
+        
+        // Prepare update query
+        if (!empty($newPassword)) {
+            // Update both username and password
+            $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+            $stmt = $conn->prepare("UPDATE faculty_users SET username = :username, password = :password WHERE id = :id");
+            $stmt->bindParam(':username', $newUsername);
+            $stmt->bindParam(':password', $hashedPassword);
+            $stmt->bindParam(':id', $sessionInfo['faculty_user_id']);
+        } else {
+            // Update only username
+            $stmt = $conn->prepare("UPDATE faculty_users SET username = :username WHERE id = :id");
+            $stmt->bindParam(':username', $newUsername);
+            $stmt->bindParam(':id', $sessionInfo['faculty_user_id']);
+        }
+        
+        if ($stmt->execute()) {
+            // Update session
+            $_SESSION['username'] = $newUsername;
+            $response['success'] = true;
+            $response['message'] = 'Profile updated successfully!';
+        } else {
+            $response['message'] = 'Failed to update profile. Please try again.';
+        }
+        
+    } catch (PDOException $e) {
+        $response['message'] = 'Database error: ' . $e->getMessage();
+    }
+    
+    // Return JSON response for AJAX
+    header('Content-Type: application/json');
+    echo json_encode($response);
     exit();
 }
 
-// Fetch the faculty name from session
-$faculty_name = $_SESSION['faculty'] ?? '';
-
-// Include your connection file
-include "../connection/connect.php"; 
-
-// Initialize success message
-$successMessage = '';
-
-// Handle form submission
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = filter_var($_POST['username'], FILTER_SANITIZE_STRING);
-    $currentPassword = filter_var($_POST['currentPassword'], FILTER_SANITIZE_STRING);
-    $newPassword = filter_var($_POST['password'], FILTER_SANITIZE_STRING);
-
-    try {
-        // Fetch current password from the database
-        $sql = "SELECT password FROM users WHERE faculty_name = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->execute([$faculty_name]);
-        $dbPassword = $stmt->fetchColumn();
-
-        // Verify current password
-        if ($currentPassword !== $dbPassword) {
-            throw new Exception("Current password is incorrect.");
-        }
-
-        // Prepare SQL update query
-        $updateSql = "UPDATE users SET username = ?";
-        
-        if (!empty($newPassword)) {
-            $updateSql .= ", password = ?";
-            $stmt = $conn->prepare($updateSql . " WHERE faculty_name = ?");
-            $stmt->execute([$username, $newPassword, $faculty_name]);
-        } else {
-            $stmt = $conn->prepare($updateSql . " WHERE faculty_name = ?");
-            $stmt->execute([$username, $faculty_name]);
-        }
-
-        // Update session username
-        $_SESSION['username'] = $username; 
-
-        // Set success message
-        $successMessage = "Profile updated successfully!";
-    } catch (Exception $e) {
-        $successMessage = "Error: " . $e->getMessage();
-    }
-}
+// If not POST request, redirect to dashboard
+header('Location: dashboard.php');
+exit();
 ?>
-
-<!-- HTML to display success message -->
-<?php if ($successMessage): ?>
-    <div class="alert alert-success" role="alert">
-        <?php echo htmlspecialchars($successMessage); ?>
-    </div>
-<?php endif; ?>
-
-<!-- Rest of your HTML code goes here -->

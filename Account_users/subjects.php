@@ -1,49 +1,30 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 
-$departmentName = $_GET['department_name'] ?? '';
-$faculty_name = $_GET['faculty'] ?? '';
-$searchInput = $_GET['search_subject'] ?? ''; // Capture the search input
+// Get department info from URL parameters
+$department_id = $_GET['department_id'] ?? '';
+$department_name = '';
 
-include "../connection/connect.php";
-
-try {
-    // Prepare SQL query for fetching subjects
-    $sql = "SELECT * FROM subjects WHERE department_name = ? AND faculty_name = ?";
-    
-    // If search input is provided, add a filter for search input
-    if (!empty($searchInput)) {
-        $sql .= " AND subject_name LIKE ?";
+if ($department_id) {
+    // Get department name
+    include "../connection/connect.php";
+    try {
+        $dept_sql = "SELECT department_name FROM departments WHERE id = ? AND faculty_id = ?";
+        $dept_stmt = $conn->prepare($dept_sql);
+        $dept_stmt->execute([$department_id, $faculty_id]);
+        $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($dept_result) {
+            $department_name = $dept_result['department_name'];
+        }
+    } catch (PDOException $e) {
+        echo "Error: " . $e->getMessage();
     }
-
-    // Add ORDER BY clause to sort the result by subject_name
-    $sql .= " ORDER BY subject_name ASC"; // Order subjects alphabetically by subject_name
-
-    $stmt = $conn->prepare($sql);
-
-    // Bind parameters with wildcard for search if provided
-    if (!empty($searchInput)) {
-        $searchParam = '%' . $searchInput . '%'; // Add wildcards for partial match
-        $stmt->execute([$departmentName, $faculty_name, $searchParam]);
-    } else {
-        $stmt->execute([$departmentName, $faculty_name]);
-    }
-
-    // Fetch the result
-    $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // Close the statement
-    $stmt = null;
-    $conn = null;
-
-} catch (PDOException $e) {
-    echo "Error: " . $e->getMessage();
 }
 ?>
 
@@ -202,20 +183,19 @@ try {
                     <div class="container-xxl flex-grow-1 container-p-y">
                         <div class="d-flex align-items-center mb-4">
                             <a href="selection_class.php" class="btn btn-secondary me-3"><i class='bx bx-arrow-back'></i></a>
-                            <h4 class="fw-bold m-0">Selected Class Details</h4>
+                            <h4 class="fw-bold m-0">Subject Management - <?php echo htmlspecialchars($department_name); ?></h4>
                         </div>
                         
                         <div class="card">
                             <div class="card-body">
                                 <div class="mb-3">
-                                    <strong>Department Name:</strong> <?php echo $departmentName; ?>
-                                </div>
-                               
-                                <div class="mb-3">
-                                    <strong>Faculty Name:</strong> <?php echo $faculty; ?>
+                                    <strong>Department:</strong> <?php echo htmlspecialchars($department_name); ?>
                                 </div>
                                 <div class="mb-3">
-                                <div><strong>Total Number of Subject:</strong> <?php echo count($subjects); ?></div>
+                                    <strong>Faculty:</strong> <?php echo htmlspecialchars($faculty); ?>
+                                </div>
+                                <div class="mb-3">
+                                    <div><strong>Total Number of Subjects:</strong> <span id="totalSubjects">Loading...</span></div>
                                 </div>
                             </div>
                         </div>
@@ -233,47 +213,18 @@ try {
                                     <button type="button" class="btn btn-danger" id="deleteAllBtn">Delete All</button>
 
                                 </div>
-                                <div class="table-">
-                                    <table class="table table-striped">
+                                <div class="table-responsive">
+                                    <table class="table table-striped" id="subjectTable">
                                         <thead>
-                                     <tr>
-                                    <th>Subject Name</th>
-                                    <th>Department Name</th>
-                                  
-                                    
-                                    <th class="text-end">Action</th>
-                                    </tr>
+                                            <tr>
+                                                <th>Subject Name</th>
+                                                <th>Department</th>
+                                                <th>Faculty</th>
+                                                <th class="text-end">Action</th>
+                                            </tr>
                                         </thead>
-                                        <tbody id="studentTableBody">
-                                            <!-- Student data will be dynamically inserted here -->
-                                            <?php if (!empty($subjects)) {
-                                                foreach ($subjects as $sub) {
-                                                    echo '<tr>';
-                                                    echo '<td>' . htmlspecialchars($sub['subject_name']) . '</td>';
-                                                    echo '<td>' . htmlspecialchars($sub['department_name']) . '</td>';
-                                                    echo '<td class="text-end">
-                                                        <button class="btn btn-sm btn-danger delete-btn" data-id="' . $sub['id'] . '" data-subject_name="' . $sub['subject_name'] . '" data-department_name="' . $sub['department_name'] . '">Delete</button>
-                                                        <!--
-                                                       <button class="btn btn-sm btn-primary edit-btn" 
-    data-id="' . $sub['id'] . '" 
-    data-subject-name="' . $sub['subject_name'] . '" 
-    data-department-name="' . $sub['department_name'] . '" 
-    data-faculty-name="' . $sub['faculty_name'] . '"
-    style="display: none;">
-    >
-
-    Edit
-</button>
--->
-
-
-                                                    </td>';
-                                                    echo '</tr>';
-                                                }
-                                            } else {
-                                                echo '<tr><td colspan="6" class="text-center">No subjects found for this departmetn</td></tr>';
-                                            } ?>
-
+                                        <tbody id="subjectTableBody">
+                                            <!-- Subject data will be dynamically inserted here via AJAX -->
                                         </tbody>
                                     </table>
                                 </div>
@@ -294,21 +245,17 @@ try {
                 <form id="addSubjectForm" method="POST">
                     <div class="mb-3">
                         <label for="subjectName" class="form-label">Subject Name</label>
-                        <input type="text" class="form-control" id="subjectName" name="new_subject" required>
+                        <input type="text" class="form-control" id="subjectName" name="subject_name" required>
                     </div>
-                    <!-- <div class="mb-3">
-                        <label for="className" class="form-label">Semester</label>
-                        <input type="text" class="form-control" id="semester" name="semester" >
-                    </div> -->
                     <div class="mb-3">
-                        <label for="departmentName" class="form-label">Department Name</label>
-                        <input type="text" class="form-control" id="departmentName" name="department_name" value="<?php echo $departmentName; ?>" readonly>
+                        <label for="departmentName" class="form-label">Department</label>
+                        <input type="text" class="form-control" id="departmentName" name="department_name" value="<?php echo htmlspecialchars($department_name); ?>" readonly>
+                        <input type="hidden" id="departmentId" name="department_id" value="<?php echo htmlspecialchars($department_id); ?>">
                     </div>
-                  
-                  
                     <div class="mb-3">
                         <label for="facultyName" class="form-label">Faculty Name</label>
-                        <input type="text" class="form-control" id="facultyName" name="faculty_name" value="<?php echo $faculty; ?>" readonly>
+                        <input type="text" class="form-control" id="facultyName" name="faculty_name" value="<?php echo htmlspecialchars($faculty); ?>" readonly>
+                        <input type="hidden" id="facultyId" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
                     </div>
                     <div class="modal-footer">
                         <button type="submit" class="btn btn-primary">Save</button>
@@ -330,21 +277,16 @@ try {
             </div>
             <div class="modal-body">
                 <form id="editSubjectForm">
-                    <input type="hidden" id="id" name="id">
+                    <input type="hidden" id="editSubjectId" name="id">
                     <input type="hidden" id="originalSubjectName" name="original_subject_name">
                     <div class="mb-3">
-                        <label for="editSubjectName" class="form-label">Current Subject Name</label>
+                        <label for="editSubjectName" class="form-label">Subject Name</label>
                         <input type="text" class="form-control" id="editSubjectName" name="subject_name" required>
                     </div>
                     <div class="mb-3">
-                        <label for="editDepartmentName" class="form-label">Department Name</label>
+                        <label for="editDepartmentName" class="form-label">Department</label>
                         <input type="text" class="form-control" id="editDepartmentName" name="department_name" readonly>
                     </div>
-                    <!-- <div class="mb-3">
-                        <label for="editClassName" class="form-label">semester</label>
-                        <input type="text" class="form-control" id="editsemester" name="semester">
-                    </div> -->
-                  
                     <div class="mb-3">
                         <label for="editFacultyName" class="form-label">Faculty Name</label>
                         <input type="text" class="form-control" id="editFacultyName" name="faculty_name" readonly>
@@ -361,32 +303,37 @@ try {
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-            
-                <div class=" d-flex flex-column">
-                   <h5 class="modal-title" id="importSubjectModalLabel">Import Subject</h5>
-                <p class="modal-title" id="importSubjectModalLabel">*the excel file must to contain only one column that is Subjects Names </p>
-                <p class="modal-title" id="importSubjectModalLabel">* firts row is included  </p>
+                <div class="d-flex flex-column">
+                   <h5 class="modal-title" id="importSubjectModalLabel">Import Subjects</h5>
+                   <div class="alert alert-warning mt-2 mb-0">
+                       <strong>⚠️ CSV ONLY!</strong>
+                       <ul class="mb-0 mt-2">
+                           <li>Create Excel with ONE column: Subject Names</li>
+                           <li>File → Save As → CSV UTF-8</li>
+                           <li>Upload the CSV file (NOT .xlsx!)</li>
+                       </ul>
+                   </div>
                 </div>
-                
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form  action="../Database_users/subject/import_subject.php" id="importSubjectForm" method="POST" enctype="multipart/form-data">
+                <form id="importSubjectForm" method="POST" enctype="multipart/form-data">
                     <div class="input-group">
                         <input
                             type="file"
                             class="form-control"
                             id="inputGroupFile04"
                             name="file"
+                            accept=".csv"
                             aria-describedby="inputGroupFileAddon04"
                             aria-label="Upload"
                             required
                         />
-                        <input type="text" class="form-control" id="department_name" name="department_name" hidden readonly value="<?php echo $departmentName; ?>">
-                        <input type="text" class="form-control" id="faculty" name="faculty" readonly hidden value="<?php echo $faculty; ?>">
+                        <input type="hidden" id="facultyIdImport" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
+                        <input type="hidden" id="departmentIdImport" name="department_id" value="<?php echo htmlspecialchars($department_id); ?>">
                         <button class="btn btn-outline-primary" type="submit" id="inputGroupFileAddon04">Upload</button>
-                        
                     </div>
+                    <div class="form-text text-danger mt-2"><strong>⚠️ ONLY CSV files (.csv)</strong></div>
                 </form>
             </div>
         </div>
@@ -413,278 +360,128 @@ try {
     <script src="../assets/js/custom.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-    $(document).ready(function() {
-        // Initialize toasts
-        var deleteConfirmToast = new bootstrap.Toast(document.getElementById('deleteConfirmToast'));
-        var deleteSuccessToast = new bootstrap.Toast(document.getElementById('deleteSuccessToast'));
-        var editSuccessToast = new bootstrap.Toast(document.getElementById('editSuccessToast'));
-        var errorimporttoaster = new bootstrap.Toast(document.getElementById('errorimporttoaster'));
-        var deleteAllConfirmToast = new bootstrap.Toast(document.getElementById('deleteAllConfirmToast'));
+$(document).ready(function() {
+    // Initialize toasts
+    var addSuccessToast = new bootstrap.Toast(document.getElementById('addSuccessToast'));
+    var deleteConfirmToast = new bootstrap.Toast(document.getElementById('deleteConfirmToast'));
+    var deleteSuccessToast = new bootstrap.Toast(document.getElementById('deleteSuccessToast'));
+    var editSuccessToast = new bootstrap.Toast(document.getElementById('editSuccessToast'));
+    var subjectExistsToast = new bootstrap.Toast(document.getElementById('subjectExistsToast'));
+    var errorImportToast = new bootstrap.Toast(document.getElementById('errorimporttoaster'));
+    var deleteAllConfirmToast = new bootstrap.Toast(document.getElementById('deleteAllConfirmToast'));
 
-        // Handle form submission for adding subjects
-        $('#addSubjectForm').on('submit', function(event) {
-            event.preventDefault();
-            $.ajax({
-                url: '/attendanceproject1/Database_users/subject/add_subject.php',
-                type: 'POST',
-                data: $(this).serialize(),
-                dataType: 'json',
-                beforeSend: function() {
-                    $('button[type="submit"]').prop('disabled', true);
-                },
-                success: function(response) {
-                    $('button[type="submit"]').prop('disabled', false);
-                    if (response.success) {
-                        $('#addSubjectForm')[0].reset();
-                        $('#addSubjectModal').modal('hide');
-                        setTimeout(function() {
-                            window.location.reload();
-                        }, 1000);
-                        $('#addSuccessToast').toast('show');
-                    } else {
-                        $('#subjectExistsToast').toast('show');
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error("AJAX Error: " + status + ' - ' + error);
-                    alert("An error occurred while adding the subject. Please try again.");
-                }
-            });
-        });
+    // Load subjects and count on page load
+    fetchSubjectList();
+    fetchSubjectCount();
 
-        // Handle delete button click
-        $(document).on('click', '.delete-btn', function() {
-            var id = $(this).data('id');
-            var subjectName = $(this).data('subject_name');
-            var department_name = $(this).data('department_name');
-
-            $('#deleteConfirmToast .toast-body').html(`
-                <p>Are you sure you want to delete the subject <strong>"${subjectName}"</strong>?</p>
-                <div class="mt-3 pt-3 border-top d-flex justify-content-start">
-                    <button type="button" class="btn btn-sm btn-danger me-3" id="confirmDelete">Delete</button>
-                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="toast">Cancel</button>
-                </div>
-            `);
-            deleteConfirmToast.show();
-
-            $('#confirmDelete').one('click', function() {
-                deleteConfirmToast.hide();
-                $.ajax({
-                    url: '/attendanceproject1/Database_users/subject/delete_subject.php',
-                    type: 'POST',
-                    data: {
-                        id: id,
-                        subject_name: subjectName,
-                        department_name: department_name
-                    },
-                    dataType: 'json',
-                    success: function(response) {
-                        if (response.status === 'success') {
-                            setTimeout(function() {
-                                window.location.reload();
-                            }, 800);
-                            deleteSuccessToast.show();
-                        } else {
-                            alert("An error occurred: " + response.message);
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        console.error("AJAX Error:", status, "-", error);
-                        alert("An error occurred while deleting the subject. Please try again.");
-                    }
-                });
-            });
-        });
-
-        // Show edit modal with subject details
-        $(document).on('click', '.edit-btn', function() {
-            var id = $(this).data('id');
-            var subjectName = $(this).data('subject-name');
-            var departmentName = $(this).data('department-name');
-            var facultyName = $(this).data('faculty-name');
-
-            $('#id').val(id);
-            $('#editSubjectName').val(subjectName);
-            $('#editDepartmentName').val(departmentName);
-            $('#editFacultyName').val(facultyName);
-            $('#originalSubjectName').val(subjectName);
-
-            var editModal = new bootstrap.Modal(document.getElementById('editSubjectModal'));
-            editModal.show();
-        });
-
-        // Handle form submission for editing a subject
-        $('#editSubjectForm').on('submit', function(event) {
-            event.preventDefault();
-            $.ajax({
-                url: '/attendanceproject1/Database_users/subject/edit_subject.php',
-                type: 'POST',
-                data: $(this).serialize(),
-                dataType: 'json',
-                beforeSend: function() {
-                    $('button[type="submit"]').prop('disabled', true);
-                },
-                success: function(response) {
-                    $('button[type="submit"]').prop('disabled', false);
-                    if (response.status === 'success') {
-                        $('#editSubjectModal').modal('hide');
-                        fetchSubjectList();
-                        if (typeof editSuccessToast !== 'undefined') {
-                            editSuccessToast.show();
-                        }
-                    } else {
-                        alert("An error occurred: " + response.message);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error("AJAX Error: " + status + ' - ' + error);
-                    alert("An error occurred while editing the subject. Please try again.");
-                }
-            });
-        });
-
-        // Reset form when edit modal is hidden
-        $('#editSubjectModal').on('hidden.bs.modal', function () {
-            $(this).find('form')[0].reset();
-        });
-
-     // Handle import subject form submission
-$('#importSubjectForm').on('submit', function(event) {
-    event.preventDefault();
-    var formData = new FormData(this);
-
-    $.ajax({
-        url: '/attendanceproject1/Database_users/subject/import_subject.php', // Ensure this path is correct
-        type: 'POST',
-        data: formData,
-        processData: false,
-        contentType: false,
-        beforeSend: function() {
-            $('button[type="submit"]').prop('disabled', true);
-        },
-        success: function(response) {
-            $('button[type="submit"]').prop('disabled', false);
-            
-            // Parse JSON response
-            try {
-                var res = JSON.parse(response);
-            } catch (e) {
-                console.error("Invalid JSON response", response);
-                alert("An error occurred. Please try again.");
-                return;
+    // Function to fetch subject count
+    function fetchSubjectCount() {
+        var departmentId = '<?php echo $department_id; ?>';
+        $.ajax({
+            url: '../Database_users/subject/show_subject.php?action=count&department_id=' + departmentId,
+            type: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                $('#totalSubjects').text(response.total || 0);
+            },
+            error: function(xhr, status, error) {
+                console.error('Error fetching subject count:', error);
+                $('#totalSubjects').text('Error');
             }
+        });
+    }
 
-            if (res.status === 'success') {
-                $('#importSubjectForm')[0].reset();
-                $('#importSubjectModal').modal('hide');
-
-                // Prepare the message
-                var message = res.message;
-                if (res.duplicates.length > 0) {
-                    message += '\nDuplicates removed: ' + res.duplicates.join(', ');
-                }
-
-                // Display success message with duplicates
-                $('#addSuccessToast .toast-body').text(message);
-                $('#addSuccessToast').toast('show');
-
-                // Reload after 3 seconds
-                setTimeout(function() {
-                    location.reload();
-                }, 3000);
-
-            } else {
-                // Show the error message from the server in the toast
-                $('#errorimporttoaster .toast-body').text(res.message);
-                $('#errorimporttoaster').toast('show');
+    // Function to fetch subject list
+    function fetchSubjectList(searchValue = '') {
+        var departmentId = '<?php echo $department_id; ?>';
+        $.ajax({
+            url: '../Database_users/subject/show_subject.php',
+            type: 'GET',
+            data: { 
+                search: searchValue,
+                department_id: departmentId
+            },
+            success: function(response) {
+                $('#subjectTableBody').html(response);
+            },
+            error: function(xhr, status, error) {
+                console.error('Error fetching subject list:', error);
+                $('#subjectTableBody').html('<tr><td colspan="4">Error loading subjects</td></tr>');
             }
-        },
-        error: function(xhr, status, error) {
-            $('button[type="submit"]').prop('disabled', false);
-            console.error("AJAX Error: " + status + ' - ' + error);
-            alert("An error occurred while importing the subject. Please try again.");
-        }
+        });
+    }
+
+    // Handle form submission for adding subjects
+    $('#addSubjectForm').on('submit', function(event) {
+        event.preventDefault();
+        $.ajax({
+            url: '../Database_users/subject/add_subject.php',
+            type: 'POST',
+            data: $(this).serialize(),
+            dataType: 'json',
+            beforeSend: function() {
+                $('button[type="submit"]').prop('disabled', true);
+            },
+            success: function(response) {
+                $('button[type="submit"]').prop('disabled', false);
+                if (response.success) {
+                    $('#addSubjectForm')[0].reset();
+                    $('#addSubjectModal').modal('hide');
+                    fetchSubjectList();
+                    fetchSubjectCount();
+                    addSuccessToast.show();
+                } else {
+                    subjectExistsToast.show();
+                }
+            },
+            error: function(xhr, status, error) {
+                $('button[type="submit"]').prop('disabled', false);
+                console.error("AJAX Error: " + status + ' - ' + error);
+                $('#errorimporttoaster .toast-body').text("An error occurred while adding the subject. Please try again.");
+                errorImportToast.show();
+            }
+        });
     });
-});
 
+    // Handle delete button click
+    $(document).on('click', '.delete-btn', function() {
+        var id = $(this).data('id');
+        var subjectName = $(this).data('subject-name');
 
+        $('#deleteConfirmToast .toast-body').html(`
+            <p>Are you sure you want to delete the subject <strong>"${subjectName}"</strong>?</p>
+            <div class="mt-3 pt-3 border-top d-flex justify-content-start">
+                <button type="button" class="btn btn-sm btn-danger me-3" id="confirmDelete">Delete</button>
+                <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="toast">Cancel</button>
+            </div>
+        `);
+        deleteConfirmToast.show();
 
-
-
-        // Handle search input
-        $('#searchStudentId').on('input', function() {
-            var searchStudentId = this.value;
-            var params = new URLSearchParams(window.location.search);
-            params.set('search_subject', searchStudentId);
-            window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-            fetchStudentData(searchStudentId);
-        });
-
-        // Handle delete all subjects
-        $('#deleteAllBtn').on('click', function() {
-            deleteAllConfirmToast.show();
-        });
-
-        $('#confirmDeleteAll').on('click', function() {
+        $('#confirmDelete').one('click', function() {
+            deleteConfirmToast.hide();
             $.ajax({
-                url: '/attendanceproject1/Database_users/subject/delete_all.php',
+                url: '../Database_users/subject/delete_subject.php',
                 type: 'POST',
-                data: {
-                    department_name: '<?php echo $departmentName; ?>',
-                    faculty_name: '<?php echo $faculty; ?>'
-                },
+                data: { id: id },
                 dataType: 'json',
                 success: function(response) {
                     if (response.status === 'success') {
-                        deleteAllConfirmToast.hide();
-                        $('#deleteSuccessToast').toast('show');
-                        setTimeout(function() {
-                            location.reload();
-                        }, 1000);
+                        fetchSubjectList();
+                        fetchSubjectCount();
+                        deleteSuccessToast.show();
                     } else {
-                        alert("An error occurred: " + response.message);
+                        $('#errorimporttoaster .toast-body').text("An error occurred: " + response.message);
+                        errorImportToast.show();
                     }
                 },
                 error: function(xhr, status, error) {
                     console.error("AJAX Error:", status, "-", error);
-                    alert("An error occurred while deleting all subjects. Please try again.");
+                    $('#errorimporttoaster .toast-body').text("An error occurred while deleting the subject. Please try again.");
+                    errorImportToast.show();
                 }
             });
         });
-
-        // Initial fetch of subject list on page load
-        fetchSubjectList();
     });
-
-    function fetchStudentData(searchStudentId) {
-        var xhr = new XMLHttpRequest();
-        var params = new URLSearchParams(window.location.search);
-        params.set('search_subject', searchStudentId);
-        xhr.open('GET', `${window.location.pathname}?${params.toString()}`, true);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState == 4 && xhr.status == 200) {
-                var parser = new DOMParser();
-                var doc = parser.parseFromString(xhr.responseText, 'text/html');
-                var newTableBody = doc.getElementById('studentTableBody').innerHTML;
-                document.getElementById('studentTableBody').innerHTML = newTableBody;
-                var newPagination = doc.querySelector('.pagination').innerHTML;
-                document.querySelector('.pagination').innerHTML = newPagination;
-            }
-        };
-        xhr.send();
-    }
-
-    function fetchSubjectList() {
-        // Implement this function to fetch and update the subject list
-        // This function is called after editing a subject and on page load
-    }
-</script>
-
-<script>
-$(document).ready(function() {
-    // Initialize toasts
-    var editSuccessToast = new bootstrap.Toast(document.getElementById('editSuccessToast'));
-    var subjectExistsToast = new bootstrap.Toast(document.getElementById('subjectExistsToast'));
 
     // Show edit modal with subject details
     $(document).on('click', '.edit-btn', function() {
@@ -693,12 +490,11 @@ $(document).ready(function() {
         var departmentName = $(this).data('department-name');
         var facultyName = $(this).data('faculty-name');
 
-        // Populate the modal with data
-        $('#id').val(id);
+        $('#editSubjectId').val(id);
         $('#editSubjectName').val(subjectName);
         $('#editDepartmentName').val(departmentName);
         $('#editFacultyName').val(facultyName);
-        $('#originalSubjectName').val(subjectName); // Store original name to compare later
+        $('#originalSubjectName').val(subjectName);
 
         var editModal = new bootstrap.Modal(document.getElementById('editSubjectModal'));
         editModal.show();
@@ -708,7 +504,7 @@ $(document).ready(function() {
     $('#editSubjectForm').on('submit', function(event) {
         event.preventDefault();
         $.ajax({
-            url: '/attendanceproject1/Database_users/subject/edit_subject.php', // Adjust the URL as needed
+            url: '../Database_users/subject/edit_subject.php',
             type: 'POST',
             data: $(this).serialize(),
             dataType: 'json',
@@ -717,39 +513,115 @@ $(document).ready(function() {
             },
             success: function(response) {
                 $('button[type="submit"]').prop('disabled', false);
-
-                // Check if the edit was successful
                 if (response.status === 'success') {
-                    $('#editSubjectModal').modal('hide');  // Hide the modal
-                    setTimeout(function() {
-                        location.reload();  // Reload page after 1 second
-                    }, 1000);
-                    editSuccessToast.show();  // Show success toast
-
-                // Handle case where subject already exists
+                    $('#editSubjectModal').modal('hide');
+                    fetchSubjectList();
+                    editSuccessToast.show();
                 } else if (response.status === 'exists') {
-                    // Set the message for the toast
                     $('#subjectExistsToast .toast-body').text(response.message || "This subject already exists.");
-                    subjectExistsToast.show();  // Show the "subject exists" toast
-
-                // Handle unexpected errors
-                } else if (response.status === 'error') {
-                    // Log error message quietly
-                    console.error("Error: " + (response.message || "An unknown error occurred."));
+                    subjectExistsToast.show();
+                } else {
+                    $('#errorimporttoaster .toast-body').text("An error occurred: " + response.message);
+                    errorImportToast.show();
                 }
             },
             error: function(xhr, status, error) {
                 $('button[type="submit"]').prop('disabled', false);
-                // Log AJAX errors quietly without alerting
                 console.error("AJAX Error: " + status + ' - ' + error);
-                // If you want to handle specific status codes here, you can do so without showing alerts.
+                $('#errorimporttoaster .toast-body').text("An error occurred while editing the subject. Please try again.");
+                errorImportToast.show();
             }
         });
     });
 
-    // Remove lingering modal backdrop when the modal is hidden
-    $('#editSubjectModal').on('hidden.bs.modal', function () {
-        $('.modal-backdrop').remove();  // Ensure the modal backdrop is removed
+    // Handle import subject form submission
+    $('#importSubjectForm').on('submit', function(event) {
+        event.preventDefault();
+        var formData = new FormData(this);
+
+        $.ajax({
+            url: '../Database_users/subject/import_subject.php',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            dataType: 'json',
+            beforeSend: function() {
+                $('button[type="submit"]').prop('disabled', true);
+            },
+            success: function(res) {
+                $('button[type="submit"]').prop('disabled', false);
+
+                if (res.status === 'success') {
+                    $('#importSubjectForm')[0].reset();
+                    $('#importSubjectModal').modal('hide');
+
+                    var message = res.message;
+                    if (res.duplicates && res.duplicates.length > 0) {
+                        message += '\nDuplicates skipped: ' + res.duplicates.join(', ');
+                    }
+
+                    $('#addSuccessToast .toast-body').text(message);
+                    addSuccessToast.show();
+                    
+                    fetchSubjectList();
+                    fetchSubjectCount();
+                } else {
+                    $('#errorimporttoaster .toast-body').text(res.message);
+                    errorImportToast.show();
+                }
+            },
+            error: function(xhr, status, error) {
+                $('button[type="submit"]').prop('disabled', false);
+                console.error("AJAX Error:", error);
+                console.error("Response:", xhr.responseText);
+                $('#errorimporttoaster .toast-body').text("An error occurred. Please try again.");
+                errorImportToast.show();
+            }
+        });
+    });
+
+    // Handle search input
+    $('#searchStudentId').on('input', function() {
+        var searchValue = $(this).val().trim();
+        fetchSubjectList(searchValue);
+    });
+
+    // Handle delete all subjects
+    $('#deleteAllBtn').on('click', function() {
+        deleteAllConfirmToast.show();
+    });
+
+    $('#confirmDeleteAll').on('click', function() {
+        var departmentId = '<?php echo $department_id; ?>';
+        $.ajax({
+            url: '../Database_users/subject/delete_all_subject.php',
+            type: 'POST',
+            data: { department_id: departmentId },
+            dataType: 'json',
+            success: function(response) {
+                if (response.status === 'success') {
+                    deleteAllConfirmToast.hide();
+                    $('#deleteSuccessToast .toast-body').text('All subjects deleted successfully (' + response.deleted_count + ' subjects)');
+                    deleteSuccessToast.show();
+                    fetchSubjectList();
+                    fetchSubjectCount();
+                } else {
+                    $('#errorimporttoaster .toast-body').text("An error occurred: " + response.message);
+                    errorImportToast.show();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error("AJAX Error:", status, "-", error);
+                $('#errorimporttoaster .toast-body').text("An error occurred while deleting all subjects. Please try again.");
+                errorImportToast.show();
+            }
+        });
+    });
+
+    // Remove lingering modal backdrop when modals are hidden
+    $('#editSubjectModal, #addSubjectModal, #importSubjectModal').on('hidden.bs.modal', function () {
+        $('.modal-backdrop').remove();
     });
 });
 </script>

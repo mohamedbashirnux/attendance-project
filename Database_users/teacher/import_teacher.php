@@ -1,93 +1,165 @@
 <?php
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
+
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
-require('../../library/php-excel-reader/excel_reader2.php');
-require('../../library/SpreadsheetReader.php');
+// Include the SpreadsheetReader library
+require_once '../../library/SpreadsheetReader.php';
 
-$response = ['status' => 'error', 'message' => ''];
+// Clear any unexpected output from includes
+ob_clean();
+
+// Set content type to JSON
+header('Content-Type: application/json');
 
 try {
-    if (isset($_FILES['file'])) {
-        $allowedMimes = [
-            'application/vnd.ms-excel', 
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/xls', 
-            'text/xlsx', 
-            'application/vnd.oasis.opendocument.spreadsheet'
-        ];
-
-        $fileType = $_FILES["file"]["type"];
-
-        if (in_array($fileType, $allowedMimes)) {
-            $uploadFilePath = '../../uploads/' . basename($_FILES['file']['name']);
-            if (move_uploaded_file($_FILES['file']['tmp_name'], $uploadFilePath)) {
-                $Reader = new SpreadsheetReader($uploadFilePath);
-
-                $Reader->ChangeSheet(0);
-                $count = 0;
-                $errors = [];
-                $insertSuccess = true;
-
-                // Prepare statements for duplicate check and insertion
-                $checkStmt = $conn->prepare("SELECT COUNT(*) FROM teachertable WHERE tid = :tid");
-                $insertStmt = $conn->prepare("INSERT INTO teachertable (tid, teacher_name, username, password) VALUES (:tid, :teacher_name, :username, :password)");
-
-                foreach ($Reader as $Row) {
-                    $count++;
-                    // skips titles from excel file while inserting
-                    if (count($Row) < 4) {
-                        $errors[] = "Incomplete data at row $count";
-                        continue; // Skip if row data is incomplete
-                    }
-
-                    $tid = isset($Row[0]) ? $Row[0] : '';
-                    $teacherName = isset($Row[1]) ? $Row[1] : '';
-                    $username = isset($Row[2]) ? $Row[2] : '';
-                    $password = isset($Row[3]) ? $Row[3] : '';
-
-                    // Check if teacher already exists
-                    $checkStmt->bindParam(':tid', $tid, PDO::PARAM_STR);
-                    $checkStmt->execute();
-                    $countExists = $checkStmt->fetchColumn();
-
-                    if ($countExists > 0) {
-                        $errors[] = "Teacher with ID '$tid' already exists.";
-                        $insertSuccess = false;
-                        continue; // Skip to next row
-                    }
-
-                    // Insert new teacher
-                    $insertStmt->bindParam(':tid', $tid, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':teacher_name', $teacherName, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':username', $username, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':password', $password, PDO::PARAM_STR);
-
-                    if (!$insertStmt->execute()) {
-                        $errors[] = "Failed to insert row $count: " . $insertStmt->errorInfo()[2];
-                    }
-                }
-
-                if ($insertSuccess && empty($errors)) {
-                    $response['status'] = 'success';
-                    $response['message'] = 'Teachers imported successfully';
-                } else {
-                    $response['message'] = implode(', ', $errors);
-                }
-
-            } else {
-                $response['message'] = 'Failed to move uploaded file.';
-            }
-        } else {
-            $response['message'] = 'Only Excel files are allowed!';
-        }
-    } else {
-        $response['message'] = 'No file uploaded.';
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
+
+    $faculty_id = $sessionInfo['faculty_id'];
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception("Please select a valid Excel file");
+    }
+
+    $uploadedFile = $_FILES['file'];
+    $fileName = $uploadedFile['name'];
+    $fileTmpName = $uploadedFile['tmp_name'];
+    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+
+    // Validate file extension
+    if (!in_array($fileExtension, ['xlsx', 'xls', 'csv'])) {
+        throw new Exception("Invalid file format. Please upload Excel (.xlsx, .xls) or CSV file");
+    }
+
+    // Read the spreadsheet
+    $reader = new SpreadsheetReader($fileTmpName);
+    $sheets = $reader->Sheets();
+    
+    if (empty($sheets)) {
+        throw new Exception("No sheets found in the uploaded file");
+    }
+
+    // Use the first sheet
+    $reader->ChangeSheet(0);
+    
+    $successCount = 0;
+    $errorCount = 0;
+    $errors = [];
+    $rowNumber = 0;
+
+    foreach ($reader as $row) {
+        $rowNumber++;
+        
+        // Skip header row
+        if ($rowNumber === 1) {
+            continue;
+        }
+
+        // Skip empty rows
+        if (empty(array_filter($row))) {
+            continue;
+        }
+
+        // Validate row has required columns (now only 4: ID, Name, Username, Password)
+        if (count($row) < 4) {
+            $errors[] = "Row $rowNumber: Missing required columns";
+            $errorCount++;
+            continue;
+        }
+
+        $teacher_id = trim($row[0] ?? '');
+        $full_name = trim($row[1] ?? '');
+        $username = trim($row[2] ?? '');
+        $password = trim($row[3] ?? '');
+
+        // Validate required fields
+        if (empty($teacher_id) || empty($full_name) || empty($username) || empty($password)) {
+            $errors[] = "Row $rowNumber: Missing required data";
+            $errorCount++;
+            continue;
+        }
+
+        try {
+            // Check if teacher already exists
+            $check_sql = "SELECT id FROM teachers WHERE id = ? OR username = ?";
+            $check_stmt = $conn->prepare($check_sql);
+            $check_stmt->execute([$teacher_id, $username]);
+            
+            if ($check_stmt->rowCount() > 0) {
+                $errors[] = "Row $rowNumber: Teacher ID '$teacher_id' or username '$username' already exists";
+                $errorCount++;
+                continue;
+            }
+
+            // Hash the password
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+            // Insert teacher (removed department_id)
+            $insert_sql = "INSERT INTO teachers (id, faculty_id, full_name, username, password) VALUES (?, ?, ?, ?, ?)";
+            $insert_stmt = $conn->prepare($insert_sql);
+            
+            if ($insert_stmt->execute([$teacher_id, $faculty_id, $full_name, $username, $hashed_password])) {
+                $successCount++;
+            } else {
+                $errors[] = "Row $rowNumber: Failed to insert teacher";
+                $errorCount++;
+            }
+
+        } catch (PDOException $e) {
+            $errors[] = "Row $rowNumber: Database error - " . $e->getMessage();
+            $errorCount++;
+        }
+    }
+
+    // Prepare response message
+    $message = "Import completed: $successCount teachers added successfully";
+    if ($errorCount > 0) {
+        $message .= ", $errorCount errors occurred";
+        if (count($errors) <= 5) {
+            $message .= ": " . implode("; ", $errors);
+        } else {
+            $message .= ". First 5 errors: " . implode("; ", array_slice($errors, 0, 5));
+        }
+    }
+
+    ob_clean();
+    echo json_encode([
+        "status" => $successCount > 0 ? "success" : "error",
+        "message" => $message,
+        "success_count" => $successCount,
+        "error_count" => $errorCount
+    ]);
+
 } catch (Exception $e) {
-    $response['message'] = $e->getMessage();
+    ob_clean();
+    echo json_encode([
+        "status" => "error",
+        "message" => $e->getMessage()
+    ]);
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode([
+        "status" => "error",
+        "message" => "Database error: " . $e->getMessage()
+    ]);
 }
 
-$conn = null;
-
-echo json_encode($response);
+ob_end_flush();
 ?>

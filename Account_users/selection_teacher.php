@@ -1,12 +1,99 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
+
+// Include database connection
+include "../connection/connect.php";
+
+// Fetch departments for this faculty
+$departments = [];
+try {
+    $dept_sql = "SELECT id, department_name FROM departments WHERE faculty_id = ? ORDER BY department_name";
+    $dept_stmt = $conn->prepare($dept_sql);
+    $dept_stmt->execute([$faculty_id]);
+    $departments = $dept_stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    echo "Error fetching departments: " . $e->getMessage();
+}
+
+// Handle AJAX request for getting classes
+if (isset($_POST['action']) && $_POST['action'] === 'get_classes') {
+    header('Content-Type: application/json');
+    
+    $department_id = $_POST['department_id'] ?? '';
+    
+    try {
+        $classes_sql = "SELECT id, class_name, study_mode, semester, academic_year 
+                       FROM classes 
+                       WHERE department_id = ? AND faculty_id = ? 
+                       ORDER BY class_name, study_mode";
+        $classes_stmt = $conn->prepare($classes_sql);
+        $classes_stmt->execute([$department_id, $faculty_id]);
+        $classes = $classes_stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        echo json_encode(['success' => true, 'classes' => $classes]);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
     exit();
 }
 
-$faculty = $_SESSION['faculty'];
+// Handle AJAX request for getting subjects
+if (isset($_POST['action']) && $_POST['action'] === 'get_subjects') {
+    header('Content-Type: application/json');
+    
+    $class_id = $_POST['class_id'] ?? '';
+    
+    try {
+        // Get subjects assigned to this class
+        $subjects_sql = "SELECT s.id, s.subject_name 
+                        FROM subject_class sc 
+                        JOIN subjects s ON sc.subject_id = s.id 
+                        WHERE sc.class_id = ? AND sc.faculty_id = ? 
+                        ORDER BY s.subject_name";
+        $subjects_stmt = $conn->prepare($subjects_sql);
+        $subjects_stmt->execute([$class_id, $faculty_id]);
+        $subjects = $subjects_stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        echo json_encode(['success' => true, 'subjects' => $subjects]);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit();
+}
+
+// Handle AJAX request for getting teacher name
+if (isset($_POST['action']) && $_POST['action'] === 'get_teacher_name') {
+    header('Content-Type: application/json');
+    
+    $teacher_id = $_POST['teacher_id'] ?? '';
+    
+    try {
+        // Get teacher by teacher_id (the actual teacher identifier like TCH-2024-001)
+        $teacher_sql = "SELECT id, full_name FROM teachers WHERE teacher_id = ?";
+        $teacher_stmt = $conn->prepare($teacher_sql);
+        $teacher_stmt->execute([$teacher_id]);
+        $teacher = $teacher_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($teacher) {
+            echo json_encode([
+                'success' => true, 
+                'teacher_name' => $teacher['full_name'],
+                'auto_id' => $teacher['id']  // Return the auto-increment ID for allocations
+            ]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Teacher not found']);
+        }
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit();
+}
 ?>
 
 <!DOCTYPE html>
@@ -100,120 +187,111 @@ $faculty = $_SESSION['faculty'];
                         <!-- Form Section -->
                         <div class="card">
                             <div class="card-body">
+                                <div class="mb-3">
+                                    <strong>Faculty:</strong> <?php echo htmlspecialchars($faculty); ?>
+                                </div>
                                 <form id="allocationForm" method="POST">
                                     <div class="row">
                                         <div class="col-md-4 mb-3">
                                             <label for="teacherId" class="form-label">Teacher ID</label>
-                                            <input type="number" class="form-control" id="teacherId" name="teacher_id" required>
+                                            <input type="text" class="form-control" id="teacherId" name="teacher_id_display" required placeholder="Enter teacher ID (e.g., TCH-2024-001)">
+                                            <input type="hidden" id="teacherAutoId" name="teacher_id" value="">
                                         </div>
                                         <div class="col-md-4 mb-3">
                                             <label for="teacherName" class="form-label">Teacher Name</label>
-                                            <input type="text" class="form-control" id="teacherName" name="teacher_name" readonly>
+                                            <input type="text" class="form-control" id="teacherName" name="teacher_name" readonly placeholder="Teacher name will appear here">
                                         </div>
                                         <div class="col-md-4 mb-3">
                                             <label for="departmentSelect" class="form-label">Department</label>
-                                            <select class="form-select" id="departmentSelect" name="department_name" required>
+                                            <select class="form-select" id="departmentSelect" name="department_id" required>
                                                 <option value="" disabled selected>Choose department</option>
-                                                <!-- Options populated dynamically -->
+                                                <?php foreach ($departments as $dept): ?>
+                                                    <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['department_name']); ?></option>
+                                                <?php endforeach; ?>
                                             </select>
                                         </div>
-
-                                  </div>     <!--  -->
+                                    </div>
                                     <div class="row">
-                                       
                                         <div class="col-md-4 mb-3">
                                             <label for="classSelect" class="form-label">Class</label>
-                                            <select class="form-select" id="classSelect" name="class_name" required>
+                                            <select class="form-select" id="classSelect" name="class_id" required>
                                                 <option value="" disabled selected>Choose a class</option>
                                                 <!-- Options populated dynamically based on selected department -->
                                             </select>
                                         </div>
-                                        <input type="text" class="form-control" id="c_id" name="c_id" hidden>
                                         <div class="col-md-4 mb-3">
                                             <label for="subjectSelect" class="form-label">Subject</label>
-                                            <select class="form-select" id="subjectSelect" name="subject_name" required>
+                                            <select class="form-select" id="subjectSelect" name="subject_id" required>
                                                 <option value="" disabled selected>Choose subject</option>
                                                 <!-- Options populated dynamically based on selected class -->
                                             </select>
                                         </div>
-
                                         <div class="col-md-4 mb-3">
                                             <label for="faculty" class="form-label">Faculty</label>
                                             <input type="text" class="form-control" id="faculty" name="faculty_name" readonly value="<?php echo htmlspecialchars($faculty); ?>">
+                                            <input type="hidden" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
                                         </div>
-
-
                                     </div>
                                     <div class="row">
-                                       
-                                       
-                                          <div class="col-md-6 mb-3">
-                                             <label for="time" class="form-label">Start Time</label>
-                                            <input type="time"  class="form-control" id="start_time" name="start_time"  required />
+                                        <div class="col-md-6 mb-3">
+                                            <label for="start_time" class="form-label">Start Time</label>
+                                            <input type="time" class="form-control" id="start_time" name="start_time" required />
                                         </div>
-
-                                          <div class="col-md-6 mb-3">
-                                             <label for="time" class="form-label">End Time</label>
-                                            <input type="time"  class="form-control" id="end_time" name="end_time"  required />
+                                        <div class="col-md-6 mb-3">
+                                            <label for="end_time" class="form-label">End Time</label>
+                                            <input type="time" class="form-control" id="end_time" name="end_time" required />
                                         </div>
-                                        <input type="hidden" id="studyModeHidden" name="study_mode" />
                                     </div>
                                     <div class="row">
                                         <div class="col-12 d-flex justify-content-center align-items-center">
                                             <button type="submit" class="btn btn-primary me-3">Allocate Subject</button>
-                                            <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#viewTeachersModal">See Allocated Classes</button>
+                                            <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#viewAllocationsModal">View Allocations</button>
                                         </div>
                                     </div>
                                 </form>
+                            </div>
+                        </div>
 
-                                <!-- Modal to View Allocated Teachers and Subjects -->
-                               
- 
-<div class="modal fade" id="viewTeachersModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">View Allocated Teachers and Subjects</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form id="allocateForm" action="allocate.php" method="GET">
-                <!-- Hidden input to store semester value -->
-                <input type="hidden" id="semesterHidden" name="semester" />
-                <input type="hidden" id="classHidden" name="classHidden" />
-
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="modalDepartmentSelect" class="form-label">Department</label>
-                        <select class="form-select" id="modalDepartmentSelect" name="department_name" required>
-                            <option value="" disabled selected>Choose department</option>
-                            <!-- Options populated dynamically -->
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="modalClassSelect" class="form-label">Class</label>
-                        <select class="form-select" id="modalClassSelect" name="class_name" required>
-                            <option value="" disabled selected>Choose a class</option>
-                            <!-- Options populated dynamically based on selected department -->
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="modalStudyMode" class="form-label">Study Mode</label>
-                        <input type="text" class="form-control" id="modalStudyMode" name="study_mode" readonly>
-                    </div>
-                    <div class="mb-3">
-                        <label for="modalFaculty" class="form-label">Faculty</label>
-                        <input type="text" class="form-control" id="modalFaculty" name="faculty_name" readonly value="<?php echo htmlspecialchars($faculty); ?>">
-                    </div>
-                    <div class="modal-footer">
-                        <button type="submit" class="btn btn-primary" id="goButton">Go</button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-<!-- Container to display the response -->
-<div id="responseContainer"></div>
+                                <!-- Modal to View Allocations -->
+                                <div class="modal fade" id="viewAllocationsModal" tabindex="-1" aria-hidden="true">
+                                    <div class="modal-dialog modal-lg" role="document">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">View Teacher Allocations</h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <form action="allocate.php" method="GET">
+                                                    <div class="mb-3">
+                                                        <label for="modalDepartmentSelect" class="form-label">Department</label>
+                                                        <select class="form-select" id="modalDepartmentSelect" name="department_id" required>
+                                                            <option value="" disabled selected>Choose department</option>
+                                                            <?php foreach ($departments as $dept): ?>
+                                                                <option value="<?php echo $dept['id']; ?>"><?php echo htmlspecialchars($dept['department_name']); ?></option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label for="modalClassSelect" class="form-label">Class</label>
+                                                        <select class="form-select" id="modalClassSelect" name="class_id" required>
+                                                            <option value="" disabled selected>Choose a class</option>
+                                                            <!-- Options populated dynamically based on selected department -->
+                                                        </select>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label for="modalFaculty" class="form-label">Faculty</label>
+                                                        <input type="text" class="form-control" id="modalFaculty" name="faculty_name" readonly value="<?php echo htmlspecialchars($faculty); ?>">
+                                                        <input type="hidden" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <button type="submit" class="btn btn-primary">View Allocations</button>
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
 
 
                             </div>
@@ -240,211 +318,191 @@ $faculty = $_SESSION['faculty'];
     <script src="../assets/js/main.js"></script>
     <!-- Page JS - Implement your dynamic form logic here -->
     <script>
-  $(document).ready(function() {
-    // Function to handle AJAX errors
-    function handleAjaxError(jqXHR, textStatus, errorThrown, elementId, defaultMessage) {
-        console.error('AJAX Error:', textStatus, errorThrown);
-        $(`#${elementId}`).html(`<option value="" disabled selected>${defaultMessage}</option>`);
-    }
+    $(document).ready(function() {
+        // Initialize toasts
+        var addSuccessToast = new bootstrap.Toast(document.getElementById('addSuccessToast'));
+        var warningToast = new bootstrap.Toast(document.getElementById('warningToast'));
+        var errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
 
-    // Populate departments dropdown on page load
-    $.ajax({
-        url: '../Database_users/subject/fetch_departments.php',
-        type: 'GET',
-        success: function(data) {
-            $('#departmentSelect').html('<option value="" disabled selected>Choose department</option>' + data);
-            $('#modalDepartmentSelect').html('<option value="" disabled selected>Choose department</option>' + data);
-        },
-        error: function(jqXHR, textStatus, errorThrown) {
-            handleAjaxError(jqXHR, textStatus, errorThrown, 'departmentSelect', 'Error loading departments');
-        }
-    });
-
-    // Handle change in department selection
-    $('#departmentSelect').change(function() {
-        var departmentId = $(this).val();
-        if (!departmentId) {
-            $('#classSelect').html('<option value="" disabled selected>Choose a class</option>');
-            $('#studyModeHidden').val('');
-            $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
-            return; // Exit early if no department selected
-        }
-        $.ajax({
-            url: '../Database_users/allocate_update_teaher/fetch_classes.php',
-            type: 'GET',
-            data: { department_name: departmentId },
-            success: function(data) {
-                $('#classSelect').html('<option value="" disabled selected>Choose a class</option>' + data);
-                $('#studyModeHidden').val('');
-                $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                handleAjaxError(jqXHR, textStatus, errorThrown, 'classSelect', 'Error loading classes');
-            }
-        });
-    });
-
-    // Handle change in class selection
-    $('#classSelect').change(function() {
-        var classId = $(this).val();
-        var className = $("#classSelect option:selected").data('class-name');
-        var departmentName = $('#departmentSelect option:selected').text();
-        
-        $.ajax({
-            url: '../Database_users/allocate_update_teaher/fetch_study_mode1.php',
-            type: 'GET',
-            data: { class_id: classId },
-            success: function(data) {
-                var studyMode = data.trim();
-              
-                $('#studyModeHidden').val(studyMode);
-
-                // Fetch subjects for selected class
+        // Handle teacher ID input - fetch teacher name
+        $('#teacherId').on('blur', function() {
+            var teacherId = $(this).val().trim();
+            if (teacherId) {
                 $.ajax({
-                    url: '../Database_users/allocate_update_teaher/fetch_sub_class.php',
-                    type: 'GET',
-                    data: {
-                        department_name: departmentName,
-                        class_name: className,
-                        study_mode: studyMode
+                    url: 'selection_teacher.php',
+                    type: 'POST',
+                    data: { 
+                        action: 'get_teacher_name',
+                        teacher_id: teacherId
                     },
-                    success: function(data) {
-                        $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>' + data);
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success) {
+                            $('#teacherName').val(response.teacher_name);
+                            $('#teacherAutoId').val(response.auto_id); // Store the auto-increment ID for allocation
+                        } else {
+                            $('#teacherName').val('Teacher not found');
+                            $('#teacherAutoId').val('');
+                        }
                     },
-                    error: function(jqXHR, textStatus, errorThrown) {
-                        handleAjaxError(jqXHR, textStatus, errorThrown, 'subjectSelect', 'Error loading subjects');
+                    error: function() {
+                        $('#teacherName').val('Error fetching teacher name');
+                        $('#teacherAutoId').val('');
                     }
                 });
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                console.error('Error fetching study mode:', textStatus, errorThrown);
-                $('#studyModeHidden').val('');
+            } else {
+                $('#teacherName').val('');
+                $('#teacherAutoId').val('');
             }
         });
-    });
 
-    // Handle teacher name fetching
-    $('#teacherId').blur(function() {
-        var teacherId = $(this).val();
-        $.ajax({
-            url: '../Database_users/subject/fetch_teacher_name.php',
-            type: 'GET',
-            data: { teacher_id: teacherId },
-            success: function(data) {
-                var trimmedData = data.trim();
-                $('#teacherName').val(trimmedData === 'Unknown teacher' ? 'Unknown teacher' : trimmedData);
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                console.error('Error fetching teacher name:', textStatus, errorThrown);
-                $('#teacherName').val('Error fetching teacher name');
+        // Handle department selection - fetch classes
+        $('#departmentSelect').on('change', function() {
+            var departmentId = $(this).val();
+            if (departmentId) {
+                $.ajax({
+                    url: 'selection_teacher.php',
+                    type: 'POST',
+                    data: { 
+                        action: 'get_classes',
+                        department_id: departmentId
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success) {
+                            var options = '<option value="" disabled selected>Choose a class</option>';
+                            response.classes.forEach(function(cls) {
+                                options += '<option value="' + cls.id + '">' + cls.class_name + ' - ' + cls.study_mode + ' (' + cls.semester + ', ' + cls.academic_year + ')</option>';
+                            });
+                            $('#classSelect').html(options);
+                        } else {
+                            $('#classSelect').html('<option value="" disabled selected>Error loading classes</option>');
+                        }
+                        $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
+                    },
+                    error: function() {
+                        $('#classSelect').html('<option value="" disabled selected>Error loading classes</option>');
+                        $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
+                    }
+                });
+            } else {
+                $('#classSelect').html('<option value="" disabled selected>Choose a class</option>');
+                $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
             }
         });
-    });
 
-    // Handle main form submission
-    $('#allocationForm').submit(function(event) {
-        event.preventDefault();
+        // Handle class selection - fetch subjects
+        $('#classSelect').on('change', function() {
+            var classId = $(this).val();
+            if (classId) {
+                $.ajax({
+                    url: 'selection_teacher.php',
+                    type: 'POST',
+                    data: { 
+                        action: 'get_subjects',
+                        class_id: classId
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success) {
+                            var options = '<option value="" disabled selected>Choose subject</option>';
+                            response.subjects.forEach(function(subject) {
+                                options += '<option value="' + subject.id + '">' + subject.subject_name + '</option>';
+                            });
+                            $('#subjectSelect').html(options);
+                        } else {
+                            $('#subjectSelect').html('<option value="" disabled selected>No subjects found</option>');
+                        }
+                    },
+                    error: function() {
+                        $('#subjectSelect').html('<option value="" disabled selected>Error loading subjects</option>');
+                    }
+                });
+            } else {
+                $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
+            }
+        });
 
-        var className = $("#classSelect option:selected").data('class-name');
-        var classId = $('#classSelect').val();
-        var formData = $(this).serialize() + '&class_name=' + encodeURIComponent(className) + '&c_id=' + encodeURIComponent(classId);
-        console.log(formData)
+        // Handle modal department selection
+        $('#modalDepartmentSelect').on('change', function() {
+            var departmentId = $(this).val();
+            if (departmentId) {
+                $.ajax({
+                    url: 'selection_teacher.php',
+                    type: 'POST',
+                    data: { 
+                        action: 'get_classes',
+                        department_id: departmentId
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success) {
+                            var options = '<option value="" disabled selected>Choose a class</option>';
+                            response.classes.forEach(function(cls) {
+                                options += '<option value="' + cls.id + '">' + cls.class_name + ' - ' + cls.study_mode + ' (' + cls.semester + ', ' + cls.academic_year + ')</option>';
+                            });
+                            $('#modalClassSelect').html(options);
+                        } else {
+                            $('#modalClassSelect').html('<option value="" disabled selected>Error loading classes</option>');
+                        }
+                    },
+                    error: function() {
+                        $('#modalClassSelect').html('<option value="" disabled selected>Error loading classes</option>');
+                    }
+                });
+            } else {
+                $('#modalClassSelect').html('<option value="" disabled selected>Choose a class</option>');
+            }
+        });
 
-        $.ajax({
-            url: '../Database_users/teacher/allocate_teacher.php',
-            type: 'POST',
-            data: formData,
-            dataType: 'json',
-            success: function(response) {
-                var toastElement, toastClass, message;
-                if (response.status === 'success') {
-                    toastElement = 'addSuccessToast';
-                    toastClass = 'bg-success';
-                    message = response.message;
-                    $('#allocationForm')[0].reset();
-                    $('#departmentSelect, #classSelect, #subjectSelect').val('');
-                    $('#teacherName, #studyModeHidden').val('');
-                } else if (response.status === 'warning' || response.message.includes('Subject already allocated')) {
-                    toastElement = 'warningToast';
-                    toastClass = 'bg-warning';
-                    message = response.message || 'Subject already allocated to the teacher for the selected criteria.';
-                } else {
-                    toastElement = 'errorToast';
-                    toastClass = 'bg-danger';
-                    message = response.message;
-                }
-                    var toast = new bootstrap.Toast(document.getElementById(toastElement));
-                    $(`#${toastElement}`).removeClass('bg-success bg-warning bg-danger').addClass(`${toastClass} text-white`);
-                    $(`#${toastElement} .toast-body`).text(message);
-                    toast.show();
+        // Handle form submission
+        $('#allocationForm').on('submit', function(event) {
+            event.preventDefault();
+            
+            // Validate that teacher is selected
+            if (!$('#teacherAutoId').val()) {
+                $('#errorToast .toast-body').text('Please enter a valid teacher ID first.');
+                errorToast.show();
+                return;
+            }
+            
+            $.ajax({
+                url: '../Database_users/allocate_teacher/add_allocation_new.php',
+                type: 'POST',
+                data: $(this).serialize(),
+                dataType: 'json',
+                beforeSend: function() {
+                    $('button[type="submit"]').prop('disabled', true);
+                },
+                success: function(response) {
+                    $('button[type="submit"]').prop('disabled', false);
+                    
+                    if (response.success) {
+                        $('#allocationForm')[0].reset();
+                        $('#teacherName').val('');
+                        $('#teacherAutoId').val('');
+                        $('#classSelect').html('<option value="" disabled selected>Choose a class</option>');
+                        $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
+                        
+                        $('#addSuccessToast .toast-body').text(response.message);
+                        addSuccessToast.show();
+                    } else {
+                        if (response.message.includes('already allocated') || response.message.includes('conflict')) {
+                            $('#warningToast .toast-body').text(response.message);
+                            warningToast.show();
+                        } else {
+                            $('#errorToast .toast-body').text(response.message);
+                            errorToast.show();
+                        }
+                    }
                 },
                 error: function() {
-                    var toast = new bootstrap.Toast(document.getElementById('errorToast'));
-                    $('#errorToast').removeClass('bg-success bg-warning').addClass('bg-danger text-white');
+                    $('button[type="submit"]').prop('disabled', false);
                     $('#errorToast .toast-body').text('An error occurred. Please try again.');
-                    toast.show();
+                    errorToast.show();
                 }
             });
         });
-
-     
-
-
-
-        $('#modalDepartmentSelect').change(function() {
-            var departmentId = $(this).val();
-            if (!departmentId) {
-                $('#modalClassSelect').html('<option value="" disabled selected>Choose a class</option>');
-                $('#modalStudyMode').val('');
-                return;
-            }
-            $.ajax({
-                url: '../Database_users/subject/fetch_classes.php',
-                type: 'GET',
-                data: { department_name: departmentId },
-                success: function(data) {
-                    // console.log(data)
-                    var className = $("#modalClassSelect").val()
-                    console.log(className)
-                    $('#modalClassSelect').html('<option value="" disabled selected>Choose a class</option>' + data);
-                    $('#modalStudyMode').val('');
-                    
-                },
-                error: function(jqXHR, textStatus, errorThrown) {
-                    handleAjaxError(jqXHR, textStatus, errorThrown, 'modalClassSelect', 'Error loading classes');
-                }
-            });
-        });
-
-        $('#modalClassSelect').change(function() {
-            var classId = $(this).val();
-            var semester = $("#modalClassSelect option:selected").data('semester'); // Get semester data from the option
-            $('#semesterHidden').val(semester);
-            var classHidden = $("#modalClassSelect option:selected").data('class-name'); // Get semester data from the option
-            $('#classHidden').val(classHidden);
-            console.log(classHidden)
-
-            if (!classId) {
-                $('#modalStudyMode').val('');
-                return;
-            }
-            $.ajax({
-                url: '../Database_users/allocate_update_teaher/fetch_study_mode1.php',
-                type: 'GET',
-                data: { class_id: classId },
-                success: function(data) {
-                    $('#modalStudyMode').val(data.trim());
-                },
-                error: function(jqXHR, textStatus, errorThrown) {
-                    console.error('Error fetching study mode:', textStatus, errorThrown);
-                    $('#modalStudyMode').val('');
-                }
-            });
-        });
-
-       
-
-
     });
     </script>
 </body>

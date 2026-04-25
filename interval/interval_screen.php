@@ -63,11 +63,11 @@
                         </div>
                         <p class="mb-4 text-center" style="color: #007BFF;">Please select your login option</p>
                         <div class="login-options d-flex justify-content-center">
-                            <a href="Auth_user.php" class="login-option btn mx-3">
+                            <a href="auth_faculty.php" class="login-option btn mx-3">
                                 <i class="bx bx-user login-icon"></i>
                                 <div>Login as User</div>
                             </a>
-                            <a href="Auth_admin.php" class="login-option btn mx-3">
+                            <a href="Auth_super_admin.php" class="login-option btn mx-3">
                                 <i class="bx bx-shield login-icon"></i>
                                 <div>Login as Admin</div>
                             </a>

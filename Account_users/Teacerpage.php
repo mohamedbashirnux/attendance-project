@@ -1,12 +1,11 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-
-$faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 ?>
 
 <!DOCTYPE html>
@@ -146,7 +145,7 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                     <table class="table table-striped" id="teacherTable">
                         <thead>
                             <tr>
-                                <th>ID</th>
+                                <th>Teacher ID</th>
                                 <th>Full Name</th>
                                 <th>Username</th>
                                 <th>Password</th>
@@ -175,8 +174,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
             <div class="modal-body">
                 <form id="addTeacherForm">
                     <div class="mb-3">
-                        <label for="id" class="form-label">ID</label>
-                        <input type="number" class="form-control" id="id" name="id" required>
+                        <label for="id" class="form-label">Teacher ID</label>
+                        <input type="text" class="form-control" id="id" name="id" placeholder="e.g., TCH-2024-001" required>
                     </div>
                     <div class="mb-3">
                         <label for="fullname" class="form-label">Full Name</label>
@@ -207,8 +206,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
             <div class="modal-body">
                 <form id="editTeacherForm">
                     <div class="mb-3">
-                        <label for="editTeacherID" class="form-label">ID</label>
-                        <input type="number" class="form-control" id="editTeacherID" readonly name="id" required>
+                        <label for="editTeacherID" class="form-label">Teacher ID</label>
+                        <input type="text" class="form-control" id="editTeacherID" readonly name="id" required>
                     </div>
                     <div class="mb-3">
                         <label for="editFullName" class="form-label">Full Name</label>
@@ -219,7 +218,7 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                         <input type="text" class="form-control" id="editUsername" name="username" required>
                     </div>
                     <div class="mb-3">
-                        <label for="editPassword" class="form-label">Password</label>
+                        <label for="editPassword" class="form-label">Password (leave blank to keep current)</label>
                         <input type="password" class="form-control" id="editPassword" name="password">
                     </div>
                     <button type="submit" class="btn btn-primary">Update Teacher</button>
@@ -245,18 +244,18 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
 
                 <div class=" d-flex flex-column text-capitalize">
                   <h5 class="modal-title" id="importTeacherModalLabel">Import Teacher</h5>
-                <p class="modal-title" id="importSubjectModalLabel">*the excel file must to contain four  column that is: </p>
-                <p class="modal-title" id="importSubjectModalLabel">* Firts column Teacher id  </p>
-                <p class="modal-title" id="importSubjectModalLabel">* Second column Teacher name  </p>
-                <p class="modal-title" id="importSubjectModalLabel">* Third column Teacher password  </p>
-              
-                <p class="modal-title" id="importSubjectModalLabel">* firts row is included  </p>
+                <p class="modal-title" id="importSubjectModalLabel">*the excel file must to contain four columns that is: </p>
+                <p class="modal-title" id="importSubjectModalLabel">* First column: Teacher ID  </p>
+                <p class="modal-title" id="importSubjectModalLabel">* Second column: Teacher Full Name  </p>
+                <p class="modal-title" id="importSubjectModalLabel">* Third column: Username  </p>
+                <p class="modal-title" id="importSubjectModalLabel">* Fourth column: Password  </p>
+                <p class="modal-title" id="importSubjectModalLabel">* First row is header (will be skipped)  </p>
                 </div>
 
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form action="/attendanceproject1/Database_users/teacher/import_teacher.php" id="importTeacherForm" method="POST" enctype="multipart/form-data">
+                <form action="../Database_users/teacher/import_teacher.php" id="importTeacherForm" method="POST" enctype="multipart/form-data">
                     <div class="input-group">
                         <input
                             type="file"
@@ -302,7 +301,7 @@ $(document).ready(function() {
     // Initialize Bootstrap toasts
     var addSuccessToast = new bootstrap.Toast(document.getElementById('addSuccessToast'));
     var teacherExistsToast = new bootstrap.Toast(document.getElementById('teacherExistsToast'));
-    var errorImportToast = new bootstrap.Toast(document.getElementById('errorimporttoaster'));
+    var errorImportToast = new bootstrap.Toast(document.getElementById('errorImportToaster'));
     var editSuccessToast = new bootstrap.Toast(document.getElementById('editSuccessToast'));
 
     // Fetch initial teacher list
@@ -312,45 +311,48 @@ $(document).ready(function() {
     $('#addTeacherForm').on('submit', function(e) {
         e.preventDefault();
         $.ajax({
-            url: '../database/Teacher/add_teacher.php',
+            url: '../Database_users/teacher/add_teacher.php',
             type: 'POST',
+            dataType: 'json',
             data: $(this).serialize(),
             beforeSend: function() {
                 $('button[type="submit"]').prop('disabled', true);
             },
             success: function(response) {
                 $('button[type="submit"]').prop('disabled', false);
-                try {
-                    var res = JSON.parse(response);
-                    if (res.success) {
-                        addSuccessToast.show();
-                        $('#basicModal').modal('hide');
-                        $('#addTeacherForm')[0].reset();
-                        setTimeout(function() {
-                            location.reload();
-                        }, 800);
+                
+                if (response.success) {
+                    $('#basicModal').modal('hide');
+                    
+                    // Remove the grey backdrop that stays
+                    setTimeout(function() {
+                        $('.modal-backdrop').remove();
+                        $('body').removeClass('modal-open');
+                        $('body').css('padding-right', '');
+                    }, 300);
+                    
+                    addSuccessToast.show();
+                    $('#addTeacherForm')[0].reset();
+                    fetchTeacherList();
+                } else {
+                    var errorMessage = "";
+                    if (response.error === 'id_exists') {
+                        errorMessage = "Teacher ID already exists.";
+                    } else if (response.error === 'username_exists') {
+                        errorMessage = "Username already exists.";
+                    } else if (response.error === 'both_exists') {
+                        errorMessage = "Both Teacher ID and Username already exist.";
                     } else {
-                        var errorMessage = "";
-                        if (res.error === 'id_exists') {
-                            errorMessage = "Teacher ID already exists.";
-                        } else if (res.error === 'username_exists') {
-                            errorMessage = "Username already exists.";
-                        } else if (res.error === 'both_exists') {
-                            errorMessage = "Both Teacher ID and Username already exist.";
-                        }
-                        $('#teacherExistsToast .toast-body').text(errorMessage);
-                        teacherExistsToast.show();
+                        errorMessage = response.message || "An error occurred.";
                     }
-                } catch (e) {
-                    console.error("Invalid JSON response", response);
-                    $('#errorimporttoaster .toast-body').text("An error occurred. Please try again.");
-                    errorImportToast.show();
+                    $('#teacherExistsToast .toast-body').text(errorMessage);
+                    teacherExistsToast.show();
                 }
             },
             error: function(xhr, status, error) {
                 $('button[type="submit"]').prop('disabled', false);
                 console.error('Error submitting form:', error);
-                $('#errorimporttoaster .toast-body').text('An error occurred. Please try again.');
+                $('#errorImportToaster .toast-body').text('An error occurred. Please try again.');
                 errorImportToast.show();
             }
         });
@@ -358,45 +360,42 @@ $(document).ready(function() {
 
     // Import Teacher Form Submission
     $('#importTeacherForm').on('submit', function(e) {
-    e.preventDefault();
-    var formData = new FormData(this);
+        e.preventDefault();
+        var formData = new FormData(this);
 
-    $.ajax({
-        url: '/attendanceproject1/Database_users/teacher/import_teacher.php',
-        type: 'POST',
-        data: formData,
-        processData: false,
-        contentType: false,
-        success: function(response) {
-            $('#importTeacherForm')[0].reset(); // Reset the form after submission
-            fetchTeacherList(); // Refresh the teacher list (assumed function)
-            $('#importTeacherModal').modal('hide'); // Hide the import modal
+        $.ajax({
+            url: '../Database_users/teacher/import_teacher.php',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                $('#importTeacherForm')[0].reset();
+                fetchTeacherList();
+                $('#importTeacherModal').modal('hide');
 
-            try {
-                var res = JSON.parse(response);
-                if (res.status === 'success') { // Check if the response status is 'success'
-                    $('#successImportToaster .toast-body').text(res.message); // Display success message
-                    $('#successImportToaster').toast('show'); // Show the success toast
-                    setTimeout(function() {
-                        location.reload(); // Reload the page after a short delay
-                    }, 800);
-                } else {
-                    $('#errorImportToaster .toast-body').text(res.message); // Display error message
-                    $('#errorImportToaster').toast('show'); // Show the error toast
+                try {
+                    var res = JSON.parse(response);
+                    if (res.status === 'success') {
+                        $('#successImportToaster .toast-body').text(res.message);
+                        $('#successImportToaster').toast('show');
+                    } else {
+                        $('#errorImportToaster .toast-body').text(res.message);
+                        $('#errorImportToaster').toast('show');
+                    }
+                } catch (e) {
+                    console.error("Invalid JSON response", response);
+                    $('#errorImportToaster .toast-body').text("An error occurred. Please try again.");
+                    $('#errorImportToaster').toast('show');
                 }
-            } catch (e) {
-                console.error("Invalid JSON response", response);
-                $('#errorImportToaster .toast-body').text("An error occurred. Please try again.");
+            },
+            error: function(xhr, status, error) {
+                console.error('Error importing teachers:', error);
+                $('#errorImportToaster .toast-body').text('An error occurred. Please try again.');
                 $('#errorImportToaster').toast('show');
             }
-        },
-        error: function(xhr, status, error) {
-            console.error('Error importing teachers:', error);
-            $('#errorImportToaster .toast-body').text('An error occurred. Please try again.');
-            $('#errorImportToaster').toast('show');
-        }
+        });
     });
-});
 
 
 
@@ -409,18 +408,15 @@ $(document).ready(function() {
     // Fetch Teacher List
     function fetchTeacherList(searchValue = '') {
         $.ajax({
-            url: '../database/Teacher/show_teacher.php',
+            url: '../Database_users/teacher/show_teacher.php',
             type: 'GET',
             data: { search: searchValue },
             success: function(response) {
-                try {
-                    $('#teacherTable tbody').html(response);
-                } catch (e) {
-                    console.error("Error processing response", response);
-                }
+                $('#teacherTable tbody').html(response);
             },
             error: function(xhr, status, error) {
                 console.error('Error fetching teacher list:', error);
+                $('#teacherTable tbody').html('<tr><td colspan="5">Error loading teachers</td></tr>');
             }
         });
     }
@@ -428,85 +424,80 @@ $(document).ready(function() {
     // Open Edit Modal and Populate Data
     window.openEditModal = function(teacherID) {
         $.ajax({
-            url: '../database/Teacher/show_teacher.php',
+            url: '../Database_users/teacher/show_teacher.php',
             type: 'GET',
+            dataType: 'json',
             data: { id: teacherID },
             success: function(response) {
-                try {
-                    var teacher = JSON.parse(response);
-                    if (teacher) {
-                        $('#editTeacherID').val(teacher.tid);
-                        $('#editFullName').val(teacher.teacher_name);
-                        $('#editUsername').val(teacher.username);
-                        $('#editPassword').val(teacher.password);
-                        $('#editTeacherModal').modal('show');
-                    } else {
-                        console.error("No teacher found with the provided ID.");
-                    }
-                } catch (e) {
-                    console.error("Invalid JSON response", response);
+                if (response) {
+                    $('#editTeacherID').val(response.tid);
+                    $('#editFullName').val(response.teacher_name);
+                    $('#editUsername').val(response.username);
+                    $('#editPassword').val(''); // Don't populate password
+                    $('#editTeacherModal').modal('show');
+                } else {
+                    console.error("No teacher found with the provided ID.");
+                    alert("Teacher not found.");
                 }
             },
             error: function(xhr, status, error) {
                 console.error('Error fetching teacher data:', error);
+                alert("Error loading teacher data.");
             }
         });
     };
 
     $('#editTeacherForm').on('submit', function(e) {
-    e.preventDefault();
-    $.ajax({
-        url: '../database/teacher/edit_teacher.php',
-        type: 'POST',
-        data: $(this).serialize(),
-        beforeSend: function() {
-            $('button[type="submit"]').prop('disabled', true);
-        },
-        success: function(response) {
-            $('button[type="submit"]').prop('disabled', false);
-
-            try {
-                var res = JSON.parse(response);
-                if (res.status === 'success') {
-                    fetchTeacherList();  // Reload the teacher list or update UI as needed
+        e.preventDefault();
+        $.ajax({
+            url: '../Database_users/teacher/edit_teacher.php',
+            type: 'POST',
+            dataType: 'json',
+            data: $(this).serialize(),
+            beforeSend: function() {
+                $('button[type="submit"]').prop('disabled', true);
+            },
+            success: function(response) {
+                $('button[type="submit"]').prop('disabled', false);
+                if (response.status === 'success') {
+                    fetchTeacherList();
                     $('#editTeacherModal').modal('hide');
-                    editSuccessToast.show(); // Show success toast or notification
+                    editSuccessToast.show();
                 } else {
-                    var errorMessage = res.message || 'An unknown error occurred.';
+                    var errorMessage = response.message || 'An unknown error occurred.';
                     $('#teacherExistsToast .toast-body').text(errorMessage);
                     teacherExistsToast.show();
                 }
-            } catch (e) {
-                console.error("Invalid JSON response", response);
-                $('#errorimporttoaster .toast-body').text("An error occurred. Please try again.");
+            },
+            error: function(xhr, status, error) {
+                $('button[type="submit"]').prop('disabled', false);
+                console.error('Error editing teacher:', error);
+                $('#errorImportToaster .toast-body').text('An error occurred. Please try again.');
                 errorImportToast.show();
             }
-        },
-        error: function(xhr, status, error) {
-            $('button[type="submit"]').prop('disabled', false);
-            console.error('Error editing teacher:', error);
-            $('#errorimporttoaster .toast-body').text('An error occurred. Please try again.');
-            errorImportToast.show();
-        }
+        });
     });
-});
-
-
 
     // Delete Teacher
     window.deleteTeacher = function(teacherID) {
         if (confirm('Are you sure you want to delete this teacher?')) {
             $.ajax({
-                url: '../database/Teacher/delete_teacher.php',
+                url: '../Database_users/teacher/delete_teacher.php',
                 type: 'POST',
+                dataType: 'json',
                 data: { teacherID: teacherID },
                 success: function(response) {
-                    fetchTeacherList();
-                    addSuccessToast.show();
+                    if (response.status === 'success') {
+                        fetchTeacherList();
+                        addSuccessToast.show();
+                    } else {
+                        $('#errorImportToaster .toast-body').text(response.message || 'Failed to delete teacher.');
+                        errorImportToast.show();
+                    }
                 },
                 error: function(xhr, status, error) {
                     console.error('Error deleting teacher:', error);
-                    $('#errorimporttoaster .toast-body').text('Failed to delete teacher. Please try again.');
+                    $('#errorImportToaster .toast-body').text('Failed to delete teacher. Please try again.');
                     errorImportToast.show();
                 }
             });

@@ -1,12 +1,11 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-
-$faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 
 // Database connection
 include "../connection/connect.php";
@@ -14,10 +13,13 @@ include "../connection/connect.php";
 // Today's date in the desired format
 $today_date = date('d-m-Y');
 
-// Query to get the list of classes
-$queryClasses = "SELECT DISTINCT class_name, study_mode, department_name FROM students WHERE faculty_name = :faculty_name";
+// Query to get the list of classes with the new normalized structure
+$queryClasses = "SELECT c.id as class_id, c.class_name, c.study_mode, c.semester, c.academic_year, d.department_name 
+                 FROM classes c 
+                 JOIN departments d ON c.department_id = d.id 
+                 WHERE c.faculty_id = :faculty_id";
 $stmtClasses = $conn->prepare($queryClasses);
-$stmtClasses->bindParam(':faculty_name', $faculty);
+$stmtClasses->bindParam(':faculty_id', $faculty_id);
 $stmtClasses->execute();
 $resultClasses = $stmtClasses->fetchAll(PDO::FETCH_ASSOC);
 
@@ -25,37 +27,29 @@ $resultClasses = $stmtClasses->fetchAll(PDO::FETCH_ASSOC);
 $classAbsenceData = [];
 
 foreach ($resultClasses as $classRow) {
+    $class_id = $classRow['class_id'];
     $class_name = $classRow['class_name'];
     $study_mode = $classRow['study_mode'];
     $department_name = $classRow['department_name'];
 
     // Query to get the total number of students in this class
-    $queryTotal = "SELECT COUNT(student_id) AS total_students FROM students WHERE class_name = :class_name AND department_name = :department_name AND study_mode = :study_mode AND faculty_name = :faculty_name";
+    $queryTotal = "SELECT COUNT(s.id) AS total_students FROM students s WHERE s.class_id = :class_id";
     $stmtTotal = $conn->prepare($queryTotal);
-    $stmtTotal->bindParam(':class_name', $class_name);
-    $stmtTotal->bindParam(':faculty_name', $faculty);
-    $stmtTotal->bindParam(':study_mode', $study_mode);
-    $stmtTotal->bindParam(':department_name', $department_name);
+    $stmtTotal->bindParam(':class_id', $class_id);
     $stmtTotal->execute();
     $totalStudentsRow = $stmtTotal->fetch(PDO::FETCH_ASSOC);
     $total_students = $totalStudentsRow['total_students'];
 
     // Query to get the number of absent students in this class today
+    // Using the absences table with correct structure
     $queryAbsent = "
-        SELECT COUNT(DISTINCT student_id) AS absent_students 
-        FROM absents 
-        WHERE DATE_FORMAT(STR_TO_DATE(SUBSTRING_INDEX(absent_date, '-', -3), '%d-%m-%Y'), '%d-%m-%Y') = :today_date 
-        AND statuses = 'absent' 
-        AND class_name = :class_name 
-        AND study_mode = :study_mode 
-        AND department_name = :department_name 
-        AND faculty_name = :faculty_name";
+        SELECT COUNT(DISTINCT a.student_id) AS absent_students 
+        FROM absences a 
+        JOIN students s ON a.student_id = s.id 
+        WHERE DATE(a.absence_date) = CURDATE()
+        AND s.class_id = :class_id";
     $stmtAbsent = $conn->prepare($queryAbsent);
-    $stmtAbsent->bindParam(':today_date', $today_date);
-    $stmtAbsent->bindParam(':class_name', $class_name);
-    $stmtAbsent->bindParam(':faculty_name', $faculty);
-    $stmtAbsent->bindParam(':study_mode', $study_mode);
-    $stmtAbsent->bindParam(':department_name', $department_name);
+    $stmtAbsent->bindParam(':class_id', $class_id);
     $stmtAbsent->execute();
     $absentStudentsRow = $stmtAbsent->fetch(PDO::FETCH_ASSOC);
     $absent_students = $absentStudentsRow['absent_students'];
@@ -65,42 +59,60 @@ foreach ($resultClasses as $classRow) {
 
     // Store the data in the array
     $classAbsenceData[] = [
+        'class_id' => $class_id,
         'class_name' => $class_name,
         'study_mode' => $study_mode,
         'department_name' => $department_name,
         'total_students' => $total_students,
         'absent_students' => $absent_students,
         'absent_rate' => round($absent_rate, 2),
-        'faculty_name' => $faculty // Include faculty_name here
+        'faculty_id' => $faculty_id
     ];
-    
 }
 
 // Function to search for a student by ID
-function searchStudentById($conn, $searchTerm, $faculty) {
-    $query = "SELECT student_id FROM students WHERE student_id = :search AND faculty_name = :faculty LIMIT 1";
+function searchStudentById($conn, $searchTerm, $faculty_id) {
+    // Clean the search term (remove BOM and extra spaces)
+    $searchTerm = trim(preg_replace('/^\x{FEFF}/u', '', $searchTerm));
+    
+    // Search for student in classes that belong to this faculty
+    $query = "SELECT s.student_id, s.full_name, s.status, s.class_id, c.class_name, c.faculty_id 
+              FROM students s 
+              INNER JOIN classes c ON s.class_id = c.id 
+              WHERE c.faculty_id = :faculty_id 
+              AND (TRIM(REPLACE(s.student_id, CHAR(0xEF, 0xBB, 0xBF), '')) = :search 
+                   OR s.student_id = :search2
+                   OR CAST(s.student_id AS CHAR) = :search3)
+              LIMIT 1";
     $stmt = $conn->prepare($query);
+    $stmt->bindParam(':faculty_id', $faculty_id, PDO::PARAM_INT);
     $stmt->bindParam(':search', $searchTerm, PDO::PARAM_STR);
-    $stmt->bindParam(':faculty', $faculty, PDO::PARAM_STR);
+    $stmt->bindParam(':search2', $searchTerm, PDO::PARAM_STR);
+    $stmt->bindParam(':search3', $searchTerm, PDO::PARAM_STR);
     $stmt->execute();
-    return $stmt->fetch(PDO::FETCH_ASSOC);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($result) {
+        return $result;
+    }
+    
+    return null;
 }
 
 // Handle the search
 $searchResult = null; // Initialize search result
 if (isset($_GET['student_search']) && !empty($_GET['student_search'])) {
-    $searchTerm = trim($_GET['student_search']);
+    $searchTerm = trim($_GET['student_search']); // Remove spaces
 
-    // Search for student by ID (no validation on the format)
-    $searchResult = searchStudentById($conn, $searchTerm, $faculty);
+    // Search for student by ID
+    $searchResult = searchStudentById($conn, $searchTerm, $faculty_id);
     
     if ($searchResult) {
         // Redirect to single_student.php if a student is found
         header("Location: single_student.php?student_id=" . urlencode($searchResult['student_id']) . "&faculty=" . urlencode($faculty));
         exit();
     } else {
-        // Student not found
-        $error_message = "No student found with the given ID.";
+        $error_message = "No student found with ID: " . htmlspecialchars($searchTerm) . " in your faculty.";
     }
 }
 
@@ -160,10 +172,10 @@ if (isset($_GET['student_search']) && !empty($_GET['student_search'])) {
                         </div>
 
                         <h4 class="fw-bold py-3 px-2 mb-2 mt-3 badge bg-label-primary rounded-pill">Daily absence rate:</h4><?php
-// Get unique departments for the faculty
-$queryDepartments = "SELECT DISTINCT department_name FROM students WHERE faculty_name = :faculty_name";
+// Get unique departments for the faculty using the new structure
+$queryDepartments = "SELECT DISTINCT d.department_name FROM departments d WHERE d.faculty_id = :faculty_id";
 $stmtDepartments = $conn->prepare($queryDepartments);
-$stmtDepartments->bindParam(':faculty_name', $faculty);
+$stmtDepartments->bindParam(':faculty_id', $faculty_id);
 $stmtDepartments->execute();
 $departments = $stmtDepartments->fetchAll(PDO::FETCH_COLUMN);
 ?>
@@ -221,7 +233,14 @@ $departments = $stmtDepartments->fetchAll(PDO::FETCH_COLUMN);
                                                     </div>
                                                     <div class="btn-group">
                                                     <a class="btn btn-primary text-white" 
-   href="allocate.php?class_name=<?php echo urlencode($classData['class_name']); ?>&classHidden=<?php echo urlencode($classData['class_name']); ?>&department_name=<?php echo urlencode($classData['department_name']); ?>&study_mode=<?php echo urlencode($classData['study_mode']); ?>&faculty_name=<?php echo urlencode($classData['faculty_name']); ?>">
+   href="allocate.php?department_id=<?php 
+   // Get department_id for this department_name
+   $dept_query = "SELECT id FROM departments WHERE department_name = ? AND faculty_id = ?";
+   $dept_stmt = $conn->prepare($dept_query);
+   $dept_stmt->execute([$classData['department_name'], $faculty_id]);
+   $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+   echo $dept_result ? $dept_result['id'] : ''; 
+   ?>&class_id=<?php echo urlencode($classData['class_id']); ?>&faculty_id=<?php echo urlencode($faculty_id); ?>">
    Allocate
 </a>
 

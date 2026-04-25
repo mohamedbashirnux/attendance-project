@@ -1,11 +1,5 @@
 <?php
-session_start();
-
-// Check if admin is logged in
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header("Location: auth_admin.php");
-    exit();
-}
+header('Content-Type: application/json');
 
 include "../../connection/connect.php"; // Assuming this file is updated for PDO connection
 
@@ -17,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         exit();
     }
 
-    $sql = "DELETE FROM facultytable WHERE faculty_name = :facultyName";
+    $sql = "DELETE FROM faculty WHERE faculty_name = :facultyName";
 
     try {
         $stmt = $conn->prepare($sql);

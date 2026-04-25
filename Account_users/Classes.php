@@ -1,12 +1,11 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-
-$faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 ?>
 
 <!DOCTYPE html>
@@ -185,16 +184,14 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                         <label for="studyMode" class="form-label">Study Mode</label>
                         <select class="form-select" id="studyMode" name="studyMode" required>
                             <option value="" disabled selected>Choose Study Mode</option>
-                            <option value="Full time morning">Full time morning</option>
-                            <option value="Full time afternoon">Full time afternoon</option>
-                            <option value="Full time evening">Full time evening</option>
-                            <option value="Weekend">Weekend</option>
+                            <!-- Options will be loaded dynamically from database -->
                         </select>
                     </div>
                     <div class="mb-3">
                         <label for="semester" class="form-label">Semester</label>
                         <select class="form-select" id="semester" name="semester" required>
-                            <!-- Semester options will be generated dynamically by JavaScript -->
+                            <option value="" disabled selected>Choose Semester</option>
+                            <!-- Options will be loaded dynamically from database -->
                         </select>
                     </div>
                     <div class="mb-3">
@@ -205,7 +202,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                     </div>
                     <div class="mb-3">
                         <label for="facultyName" class="form-label">Faculty Name</label>
-                        <input type="text" class="form-control" id="facultyName" name="facultyName" value="<?php echo htmlspecialchars($_SESSION['faculty']); ?>" readonly>
+                        <input type="text" class="form-control" id="facultyName" name="facultyName" value="<?php echo htmlspecialchars($faculty); ?>" readonly>
+                        <input type="hidden" id="facultyId" name="facultyId" value="<?php echo htmlspecialchars($faculty_id); ?>">
                     </div>
                     <div class="modal-footer">
                         <button type="submit" class="btn btn-primary">Add Class</button>
@@ -250,16 +248,14 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                         <label for="editStudyMode" class="form-label">Study Mode</label>
                         <select class="form-select" id="editStudyMode" name="studyMode" required>
                             <option value="" disabled selected>Choose Study Mode</option>
-                            <option value="Full time morning">Full time morning</option>
-                            <option value="Full time afternoon">Full time afternoon</option>
-                            <option value="Full time evening">Full time evening</option>
-                            <option value="Weekend">Weekend</option>
+                            <!-- Options will be loaded dynamically from database -->
                         </select>
                     </div>
                     <div class="mb-3">
                         <label for="editSemester" class="form-label">Semester</label>
                         <select class="form-select" id="editSemester" name="semester" required>
-                            <!-- Semester options will be generated dynamically by JavaScript -->
+                            <option value="" disabled selected>Choose Semester</option>
+                            <!-- Options will be loaded dynamically from database -->
                         </select>
                     </div>
                     <div class="mb-3">
@@ -270,7 +266,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                     </div>
                     <div class="mb-3">
                         <label for="editFacultyName" class="form-label">Faculty Name</label>
-                        <input type="text" class="form-control" id="editFacultyName" name="editFacultyName" value="<?php echo htmlspecialchars($_SESSION['faculty']); ?>" readonly>
+                        <input type="text" class="form-control" id="editFacultyName" name="editFacultyName" value="<?php echo htmlspecialchars($faculty); ?>" readonly>
+                        <input type="hidden" id="editFacultyId" name="editFacultyId" value="<?php echo htmlspecialchars($faculty_id); ?>">
                     </div>
                     <div class="modal-footer">
                         <button type="submit" class="btn btn-primary">Save Changes</button>
@@ -312,99 +309,19 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
     <script src="../assets/vendor/js/menu.js"></script>
     <script src="../assets/vendor/libs/apex-charts/apexcharts.js"></script>
     <script src="../assets/js/main.js"></script>
+    
     <script>
-    // Function to generate semester options
-    function populateEditSemesterDropdown() {
-        const semesterSelect = document.getElementById('editSemester');
-        // Clear existing options
-        semesterSelect.innerHTML = '';
-
-        // Create the "Choose Semester" option
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Choose Semester';
-        defaultOption.disabled = true;
-        defaultOption.selected = true;
-        semesterSelect.appendChild(defaultOption);
-
-        // Generate semester options from 1 to 12
-        for (let i = 1; i <= 12; i++) {
-            const option = document.createElement('option');
-            option.value = i; // Set the value to the number
-            option.textContent = `Semester ${i}`; // Display text
-            semesterSelect.appendChild(option);
-        }
-    }
-
-    // Function to generate academic year options
-    function populateEditAcademicYearDropdown() {
-        const academicYearSelect = document.getElementById('editAcademicYear');
-        const startYear = 2018; // Start from 2018
-        const currentYear = new Date().getFullYear();
-        const endYear = currentYear + 5; // End year is current year + 5
-
-        // Clear existing options
-        academicYearSelect.innerHTML = '';
-
-        // Create the "Choose Academic Year" option
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Choose Academic Year';
-        defaultOption.disabled = true;
-        defaultOption.selected = true;
-        academicYearSelect.appendChild(defaultOption);
-
-        // Generate academic year options from startYear to endYear
-        for (let year = startYear; year <= endYear; year++) {
-            const option = document.createElement('option');
-            option.value = `${year}-${year + 1}`; // e.g., "2024-2025"
-            option.textContent = `${year}-${year + 1}`; // e.g., "2024-2025"
-            academicYearSelect.appendChild(option);
-        }
-    }
-
-    // Call the functions when the edit modal is shown
-    document.getElementById('editClassModal').addEventListener('show.bs.modal', function (event) {
-        populateEditSemesterDropdown();
-        populateEditAcademicYearDropdown();
-    });
-</script>
-
-    <script>
-    // Function to generate semester options
-    function populateSemesterDropdown() {
-        const semesterSelect = document.getElementById('semester');
-        // Clear existing options
-        semesterSelect.innerHTML = '';
-
-        // Create the "Choose Semester" option
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Choose Semester';
-        defaultOption.disabled = true;
-        defaultOption.selected = true;
-        semesterSelect.appendChild(defaultOption);
-
-        // Generate semester options from 1 to 12
-        for (let i = 1; i <= 12; i++) {
-            const option = document.createElement('option');
-            option.value = i; // Set the value to the number
-            option.textContent = `Semester ${i}`; // Display text
-            semesterSelect.appendChild(option);
-        }
-    }
-
-    // Function to generate academic year options
+    // Function to generate academic year options (this stays the same)
     function populateAcademicYearDropdown() {
         const academicYearSelect = document.getElementById('academicYear');
-        const startYear = 2018; // Start from 2018
+        if (!academicYearSelect) return; // Safety check
+        
+        const startYear = 2018;
         const currentYear = new Date().getFullYear();
-        const endYear = currentYear + 5; // End year is current year + 5
+        const endYear = currentYear + 5;
 
-        // Clear existing options
         academicYearSelect.innerHTML = '';
 
-        // Create the "Choose Academic Year" option
         const defaultOption = document.createElement('option');
         defaultOption.value = '';
         defaultOption.textContent = 'Choose Academic Year';
@@ -412,21 +329,57 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
         defaultOption.selected = true;
         academicYearSelect.appendChild(defaultOption);
 
-        // Generate academic year options from startYear to endYear
         for (let year = startYear; year <= endYear; year++) {
             const option = document.createElement('option');
-            option.value = `${year}-${year + 1}`; // e.g., "2024-2025"
-            option.textContent = `${year}-${year + 1}`; // e.g., "2024-2025"
+            option.value = `${year}/${year + 1}`;
+            option.textContent = `${year}/${year + 1}`;
             academicYearSelect.appendChild(option);
         }
+        
+        console.log('Academic year dropdown populated with', academicYearSelect.children.length, 'options');
+    }
+
+    // Function to generate edit academic year options
+    function populateEditAcademicYearDropdown() {
+        const academicYearSelect = document.getElementById('editAcademicYear');
+        if (!academicYearSelect) return; // Safety check
+        
+        const startYear = 2018;
+        const currentYear = new Date().getFullYear();
+        const endYear = currentYear + 5;
+
+        academicYearSelect.innerHTML = '';
+
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Choose Academic Year';
+        defaultOption.disabled = true;
+        defaultOption.selected = true;
+        academicYearSelect.appendChild(defaultOption);
+
+        for (let year = startYear; year <= endYear; year++) {
+            const option = document.createElement('option');
+            option.value = `${year}/${year + 1}`;
+            option.textContent = `${year}/${year + 1}`;
+            academicYearSelect.appendChild(option);
+        }
+        
+        console.log('Edit academic year dropdown populated with', academicYearSelect.children.length, 'options');
     }
 
     // Call the functions when the page loads
     document.addEventListener('DOMContentLoaded', function() {
-        populateSemesterDropdown();
+        console.log('DOM loaded, initializing...');
+        fetchFormData();
         populateAcademicYearDropdown();
     });
-</script>
+
+    // Call the functions when the edit modal is shown
+    document.getElementById('editClassModal').addEventListener('show.bs.modal', function (event) {
+        fetchFormData();
+        populateEditAcademicYearDropdown();
+    });
+    </script>
 
 
     <script>
@@ -439,41 +392,70 @@ $(document).ready(function() {
     var classExistsToast = new bootstrap.Toast(document.getElementById('classExistsToast'));
     var classExistsToast = new bootstrap.Toast(document.getElementById('classExistsToast'));
 
-    // Function to fetch department names based on logged-in faculty
-    function fetchDepartmentNames(callback) {
+    // Function to fetch form data (departments and ENUM values)
+    function fetchFormData(callback) {
         $.ajax({
-            url: '../Database_users/Classes/get_department_names.php',
+            url: '../Database_users/Classes/show_classes.php?action=form_data',
             type: 'GET',
-            dataType: 'json',
+            dataType: 'json', // This tells jQuery to automatically parse JSON
             success: function(response) {
+                console.log('Form data response:', response);
                 if (response.status === 'success') {
-                    var departments = response.data;
-                    var options = '<option value="" selected disabled>Choose department</option>';
+                    // Populate department dropdowns
+                    var departments = response.departments;
+                    var departmentOptions = '<option value="" selected disabled>Choose department</option>';
                     departments.forEach(function(department) {
-                        options += '<option value="' + department + '">' + department + '</option>';
+                        departmentOptions += '<option value="' + department.id + '" data-name="' + department.department_name + '">' + department.department_name + '</option>';
                     });
-                    $('#departmentName').html(options);
-                    $('#editDepartmentName').html(options);
+                    $('#departmentName').html(departmentOptions);
+                    $('#editDepartmentName').html(departmentOptions);
+                    
+                    // Populate study mode dropdowns
+                    if (response.study_modes) {
+                        var studyModeOptions = '<option value="" disabled selected>Choose Study Mode</option>';
+                        response.study_modes.forEach(function(mode) {
+                            studyModeOptions += '<option value="' + mode + '">' + mode + '</option>';
+                        });
+                        $('#studyMode').html(studyModeOptions);
+                        $('#editStudyMode').html(studyModeOptions);
+                    }
+                    
+                    // Populate semester dropdowns
+                    if (response.semesters) {
+                        var semesterOptions = '<option value="" disabled selected>Choose Semester</option>';
+                        response.semesters.forEach(function(semester) {
+                            semesterOptions += '<option value="' + semester + '">' + semester + '</option>';
+                        });
+                        $('#semester').html(semesterOptions);
+                        $('#editSemester').html(semesterOptions);
+                    }
+                    
                     if (callback) callback();
-                } 
+                } else {
+                    console.error('Error fetching form data:', response.message);
+                    alert('Error fetching form data: ' + response.message);
+                }
             },
             error: function(xhr, status, error) {
                 console.error('AJAX Error:', status, '-', error);
                 console.log('Response:', xhr.responseText);
-                alert('An error occurred while fetching department names. Please check the console for details.');
+                alert('An error occurred while fetching form data. Please check the console for details.');
             }
         });
     }
 
-    // Call fetchDepartmentNames when the add class modal is shown
-    $('#addClassModal').on('shown.bs.modal', fetchDepartmentNames);
+    // Call fetchFormData when the add class modal is shown
+    $('#addClassModal').on('shown.bs.modal', function() {
+        fetchFormData();
+        populateAcademicYearDropdown(); // Call this when modal is shown
+    });
 
     // Clear input when Add Class modal is closed
     $('#addClassModal').on('hidden.bs.modal', function () {
         $('#addClassForm')[0].reset();
     });
 
-   // Call fetchDepartmentNames and populate edit form when the edit class modal is shown
+   // Call fetchFormData and populate edit form when the edit class modal is shown
    $('#editClassModal').on('shown.bs.modal', function() {
     var editModal = $(this);
     var row = editModal.data('row');
@@ -483,10 +465,14 @@ $(document).ready(function() {
     var className = row.find('td:eq(1)').text().trim();
     var studyMode = row.find('td:eq(2)').text().trim();
     var semester = row.find('td:eq(3)').text().trim();
-    var academicYear = row.find('td:eq(4)').text().trim(); 
+    var academicYear = row.find('td:eq(4)').text().trim();
+    var classId = row.find('.edit-btn').data('id');
 
-    // Fetch department names and populate fields
-    fetchDepartmentNames(function() {
+    // First populate academic year dropdown
+    populateEditAcademicYearDropdown();
+
+    // Fetch form data (departments and ENUM values), then populate fields
+    fetchFormData(function() {
         // Set original values in hidden fields
         editModal.find('#originalDepartmentName').val(departmentName);
         editModal.find('#originalClassName').val(className);
@@ -494,12 +480,25 @@ $(document).ready(function() {
         editModal.find('#originalSemester').val(semester);
         editModal.find('#originalAcademicYear').val(academicYear);
         
+        // Add hidden field for class ID
+        if (!editModal.find('#classId').length) {
+            editModal.find('#editClassForm').append('<input type="hidden" id="classId" name="classId">');
+        }
+        editModal.find('#classId').val(classId);
+        
+        // Find and select the correct department by name
+        $('#editDepartmentName option').each(function() {
+            if ($(this).data('name') === departmentName) {
+                $(this).prop('selected', true);
+                return false;
+            }
+        });
+        
         // Populate the edit fields
-        editModal.find('#editDepartmentName').val(departmentName).change(); // Update department dropdown
-        editModal.find('#editClassName').val(className); // Update class name
-        editModal.find('#editStudyMode').val(studyMode).change(); // Update study mode dropdown
-        editModal.find('#editSemester').val(semester).change(); // Update semester dropdown
-        editModal.find('#editAcademicYear').val(academicYear); // Update academic year dropdown
+        editModal.find('#editClassName').val(className);
+        editModal.find('#editStudyMode').val(studyMode);
+        editModal.find('#editSemester').val(semester);
+        editModal.find('#editAcademicYear').val(academicYear);
     });
 });
 
@@ -511,22 +510,42 @@ $(document).ready(function() {
         $.ajax({
             url: '../Database_users/Classes/show_classes.php',
             type: 'GET',
+            dataType: 'json', // This tells jQuery to automatically parse JSON
             data: {
                 page: page,
                 per_page: 10 // Number of items per page
             },
             success: function(response) {
-                const data = JSON.parse(response);
-                const classes = data.classes;
-                const totalPages = data.total_pages;
-                const currentPage = data.current_page;
+                console.log('Fetch classes response:', response);
+                
+                // Check if there's an error in the response
+                if (response.status === 'error') {
+                    console.error('Server error:', response.error);
+                    $('#classTable tbody').empty();
+                    $('#classTable tbody').append(
+                        '<tr><td colspan="6">Error: ' + response.error + '</td></tr>'
+                    );
+                    $('#pagination-controls').empty();
+                    return;
+                }
+                
+                const data = response; // No need to parse, jQuery already did it
+                const classes = data.classes || [];
+                const totalPages = data.total_pages || 1;
+                const currentPage = data.current_page || 1;
+                const totalRecords = data.total_records || 0;
+
+                console.log('Classes array:', classes);
+                console.log('Total pages:', totalPages);
+                console.log('Current page:', currentPage);
+                console.log('Total records:', totalRecords);
 
                 $('#classTable tbody').empty();
                 $('#pagination-controls').empty();
 
                 if (classes.length === 0) {
                     $('#classTable tbody').append(
-                        '<tr><td colspan="5">No classes found.</td></tr>'
+                        '<tr><td colspan="6">No classes found.</td></tr>'
                     );
                 } else {
                     classes.forEach(function(classData) {
@@ -539,9 +558,8 @@ $(document).ready(function() {
                                  <td>${classData.academic}</td>
                               
                                 <td class="text-end">
-                                    <button class="btn btn-sm btn-warning edit-btn  data-id="${classData.id}"">Edit</button>
-                                    <button class="btn btn-sm btn-danger delete-btn" data-id="${classData.id}" data-department="${classData.department_name}" data-study="${classData.study_mode}" data-name="${classData.class_name}">Delete</button>
-
+                                    <button class="btn btn-sm btn-warning edit-btn" data-id="${classData.id}">Edit</button>
+                                    <button class="btn btn-sm btn-danger delete-btn" data-id="${classData.id}" data-name="${classData.class_name}">Delete</button>
                                 </td>
                             </tr>`
                         );
@@ -576,7 +594,11 @@ $(document).ready(function() {
             error: function(xhr, status, error) {
                 console.error("AJAX Error: " + status + ' - ' + error);
                 console.log('Response:', xhr.responseText);
-                alert("An error occurred while fetching class data. Please check the console for details.");
+                $('#classTable tbody').empty();
+                $('#classTable tbody').append(
+                    '<tr><td colspan="6">Error loading classes. Please refresh the page.</td></tr>'
+                );
+                $('#pagination-controls').empty();
             }
         });
     }
@@ -594,18 +616,27 @@ $(document).ready(function() {
     $('#addClassForm').on('submit', function(e) {
         e.preventDefault();
         var formData = $(this).serialize();
+        
+        console.log('Submitting add class form:', formData);
+        
         $.ajax({
             url: '../Database_users/Classes/add_class.php',
             type: 'POST',
+            dataType: 'json', // This tells jQuery to automatically parse JSON
             data: formData,
-            dataType: 'json',
+            beforeSend: function() {
+                $('#addClassForm button[type="submit"]').prop('disabled', true);
+            },
             success: function(response) {
+                console.log('Add class response:', response);
+                $('#addClassForm button[type="submit"]').prop('disabled', false);
+                
                 if (response.status === 'success') {
                     $('#addClassForm')[0].reset();
                     $('#addClassModal').modal('hide');
                     fetchClassList();
                     addSuccessToast.show();
-                } else if (response.status === 'warning' && response.message === 'Class already exists') {
+                } else if (response.message === 'Class already exists') {
                     classExistsToast.show();
                 } else {
                     console.error("Error adding class:", response.message);
@@ -613,55 +644,51 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr, status, error) {
-                console.error("AJAX Error: " + status + ' - ' + error);
+                console.error("Add Class AJAX Error: " + status + ' - ' + error);
                 console.log('Response:', xhr.responseText);
+                $('#addClassForm button[type="submit"]').prop('disabled', false);
                 alert("An error occurred while adding the class. Please check the console for details.");
             }
         });
     });
 
     $(document).on('click', '.delete-btn', function() {
-    var id = $(this).data('id');
-    var class_name = $(this).data('name');
-    var department_name = $(this).data('department');
-    var study_mode = $(this).data('study');
-  
-    $('#deleteConfirmToast .toast-body').html(`
-        <p>HADDI AAD DELETE GAREESO CLASS-KAN WAXA LUMAAYO DHAMAAN XOGTA (STUDENTS, ALLOCATES)<strong>"${class_name}"</strong>?</p>
-        <div class="mt-3 pt-3 border-top d-flex justify-content-start">
-            <button type="button" class="btn btn-sm btn-danger me-3" id="confirmDelete">Delete</button>
-            <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="toast">Cancel</button>
-        </div>
-    `);
-    deleteConfirmToast.show();
+        var id = $(this).data('id');
+        var class_name = $(this).data('name');
+      
+        $('#deleteConfirmToast .toast-body').html(`
+            <p>Are you sure you want to delete the class <strong>"${class_name}"</strong>?</p>
+            <p class="text-danger"><strong>This action will permanently delete all related data including students and allocations.</strong></p>
+            <div class="mt-3 pt-3 border-top d-flex justify-content-start">
+                <button type="button" class="btn btn-sm btn-danger me-3" id="confirmDelete">Delete</button>
+                <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="toast">Cancel</button>
+            </div>
+        `);
+        deleteConfirmToast.show();
 
-    $('#confirmDelete').one('click', function() {
-        deleteConfirmToast.hide();
-        $.ajax({
-            url: '../Database_users/Classes/delete_class.php',
-            type: 'POST',
-            data: { 
-                id: id,
-                class_name: class_name,
-                department_name: department_name,
-                study_mode: study_mode,
-            },
-            dataType: 'json',
-            success: function(response) {
-                if (response.status === 'success') {
-                    fetchClassList();
-                    deleteSuccessToast.show();
-                } else {
-                    alert("An error occurred: " + response.message);
+        $('#confirmDelete').one('click', function() {
+            deleteConfirmToast.hide();
+            $.ajax({
+                url: '../Database_users/Classes/delete_class.php',
+                type: 'POST',
+                data: { id: id },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.status === 'success') {
+                        fetchClassList();
+                        deleteSuccessToast.show();
+                    } else {
+                        alert("An error occurred: " + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error("AJAX Error:", status, "-", error);
+                    console.log('Response:', xhr.responseText);
+                    alert("An error occurred while deleting the class. Please try again.");
                 }
-            },
-            error: function(xhr, status, error) {
-                console.error("AJAX Error:", status, "-", error);
-                alert("An error occurred while deleting the classes. Please try again.");
-            }
+            });
         });
     });
-});
 
 
     // Handle edit button click to store row data and show edit modal
@@ -671,114 +698,228 @@ $(document).ready(function() {
     });
 
     // Handle form submission for editing a class
-$('#editClassForm').on('submit', function(e) {
-    e.preventDefault();
-    var formData = $(this).serialize();
-    $.ajax({
-        url: '../Database_users/Classes/edit_class.php',
-        type: 'POST',
-        data: formData,
-        dataType: 'json',
-        success: function(response) {
-            console.log("Server response:", response); // Add this line for debugging
-            if (response.status === 'success') {
-                $('#editClassModal').modal('hide');
-                fetchClassList();
-                editSuccessToast.show();
-            } else if (response.status === 'warning' && response.message === 'Class already exists') {
-                classExistsToast.show();
-            } else {
-                console.error("Error editing class:", response.message);
-                alert("An error occurred: " + response.message);
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error("AJAX Error: " + status + ' - ' + error);
-            console.log('Response:', xhr.responseText);
-            alert("An error occurred while editing the class. Please check the console for details.");
-        }
-    });
-});
-});
-</script>
-<script>
-    $(document).ready(function() {
-    // Fetch and display department list in the dropdown
-    $('#sortButton').on('click', function() {
+    $('#editClassForm').on('submit', function(e) {
+        e.preventDefault();
+        var formData = $(this).serialize();
+        
+        console.log('Submitting edit class form:', formData);
+        
         $.ajax({
-            url: '../Database_users/Classes/get_department_names.php',
-            type: 'GET',
-            dataType: 'json',
+            url: '../Database_users/Classes/edit_class.php',
+            type: 'POST',
+            dataType: 'json', // This tells jQuery to automatically parse JSON
+            data: formData,
+            beforeSend: function() {
+                $('#editClassForm button[type="submit"]').prop('disabled', true);
+            },
             success: function(response) {
+                console.log("Edit class response:", response);
+                $('#editClassForm button[type="submit"]').prop('disabled', false);
+                
                 if (response.status === 'success') {
-                    const departments = response.data;
-                    const dropdown = $('#departmentSortDropdown');
-                    dropdown.empty();
-                    dropdown.append('<option value="" selected disabled>Choose Department</option>');
-                    departments.forEach(function(department) {
-                        dropdown.append(`<option value="${department}">${department}</option>`);
-                    });
-                    $('#departmentSortContainer').removeClass('d-none');
+                    $('#editClassModal').modal('hide');
+                    fetchClassList();
+                    editSuccessToast.show();
+                } else if (response.message === 'Class already exists') {
+                    classExistsToast.show();
                 } else {
-                    alert('Failed to fetch departments.');
+                    console.error("Error editing class:", response.message);
+                    alert("An error occurred: " + response.message);
                 }
             },
             error: function(xhr, status, error) {
-                console.error('Error fetching departments:', error);
-                alert('An error occurred. Please check the console for details.');
+                console.error("Edit Class AJAX Error: " + status + ' - ' + error);
+                console.log('Response:', xhr.responseText);
+                $('#editClassForm button[type="submit"]').prop('disabled', false);
+                alert("An error occurred while editing the class. Please check the console for details.");
             }
         });
     });
 
-    // Fetch and display classes for the selected department
+    // Handle Sort by Department button click
+    $('#sortButton').on('click', function() {
+        var container = $('#departmentSortContainer');
+        
+        if (container.hasClass('d-none')) {
+            // Show the container and populate departments
+            container.removeClass('d-none');
+            $(this).text('Hide Sort');
+            
+            // Fetch departments and populate dropdown
+            $.ajax({
+                url: '../Database_users/Classes/show_classes.php?action=form_data',
+                type: 'GET',
+                dataType: 'json',
+                success: function(response) {
+                    if (response.status === 'success') {
+                        var departments = response.departments;
+                        var departmentOptions = '<option value="" selected disabled>Choose Department</option>';
+                        departments.forEach(function(department) {
+                            departmentOptions += '<option value="' + department.id + '">' + department.department_name + '</option>';
+                        });
+                        $('#departmentSortDropdown').html(departmentOptions);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error fetching departments:', error);
+                    alert('Error loading departments. Please try again.');
+                }
+            });
+        } else {
+            // Hide the container and reset to show all classes
+            container.addClass('d-none');
+            $(this).text('Sort by Department');
+            $('#departmentSortDropdown').val('');
+            fetchClassList(); // Reset to show all classes
+        }
+    });
+
+    // Handle View Classes button click
     $('#viewClassesButton').on('click', function() {
-        const selectedDepartment = $('#departmentSortDropdown').val();
-        if (!selectedDepartment) {
-            alert('Please select a department.');
+        var departmentId = $('#departmentSortDropdown').val();
+        
+        if (!departmentId) {
+            alert('Please select a department first.');
             return;
         }
-
+        
+        // Fetch classes filtered by department
         $.ajax({
-            url: '../Database_users/Classes/get_classes_by_department.php',
+            url: '../Database_users/Classes/show_classes.php',
             type: 'GET',
-            data: { department: selectedDepartment },
             dataType: 'json',
+            data: {
+                department_id: departmentId,
+                page: 1,
+                per_page: 10
+            },
             success: function(response) {
-                if (response.status === 'success') {
-                    const classes = response.data;
-                    const tbody = $('#classTable tbody');
-                    tbody.empty();
-                    if (classes.length === 0) {
-                        tbody.append('<tr><td colspan="6">No classes found for this department.</td></tr>');
-                    } else {
-                        classes.forEach(function(classData) {
-                            tbody.append(
-                                `<tr>
-                                    <td>${classData.department_name}</td>
-                                    <td>${classData.class_name}</td>
-                                    <td>${classData.study_mode}</td>
-                                    <td>${classData.semester}</td>
-                                    <td>${classData.academic}</td>
-                                    <td class="text-end">
-                                        <button class="btn btn-primary btn-sm">Edit</button>
-                                        <button class="btn btn-danger btn-sm">Delete</button>
-                                    </td>
-                                </tr>`
-                            );
-                        });
-                    }
+                console.log('Filtered classes response:', response);
+                
+                if (response.status === 'error') {
+                    console.error('Server error:', response.error);
+                    $('#classTable tbody').empty();
+                    $('#classTable tbody').append(
+                        '<tr><td colspan="6">Error: ' + response.error + '</td></tr>'
+                    );
+                    $('#pagination-controls').empty();
+                    return;
+                }
+                
+                const classes = response.classes || [];
+                const totalPages = response.total_pages || 1;
+                const currentPage = response.current_page || 1;
+
+                $('#classTable tbody').empty();
+                $('#pagination-controls').empty();
+
+                if (classes.length === 0) {
+                    $('#classTable tbody').append(
+                        '<tr><td colspan="6">No classes found for this department.</td></tr>'
+                    );
                 } else {
-                    alert('Failed to fetch classes.');
+                    classes.forEach(function(classData) {
+                        $('#classTable tbody').append(
+                            `<tr>
+                                <td>${classData.department_name}</td>
+                                <td>${classData.class_name}</td>
+                                <td>${classData.study_mode}</td>
+                                <td>${classData.semester}</td>
+                                <td>${classData.academic}</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-warning edit-btn" data-id="${classData.id}">Edit</button>
+                                    <button class="btn btn-sm btn-danger delete-btn" data-id="${classData.id}" data-name="${classData.class_name}">Delete</button>
+                                </td>
+                            </tr>`
+                        );
+                    });
+
+                    // Add pagination if needed
+                    if (totalPages > 1) {
+                        let paginationHtml = `<nav aria-label="Page navigation">
+                                                  <ul class="pagination">
+                                                    <li class="page-item first ${currentPage === 1 ? 'disabled' : ''}">
+                                                      <a class="page-link dept-page" href="javascript:void(0);" data-page="1" data-dept="${departmentId}"><i class="tf-icon bx bx-chevrons-left"></i></a>
+                                                    </li>
+                                                    <li class="page-item prev ${currentPage === 1 ? 'disabled' : ''}">
+                                                      <a class="page-link dept-page" href="javascript:void(0);" data-page="${currentPage - 1}" data-dept="${departmentId}"><i class="tf-icon bx bx-chevron-left"></i></a>
+                                                    </li>`;
+
+                        for (let i = 1; i <= totalPages; i++) {
+                            paginationHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                                                <a class="page-link dept-page" href="javascript:void(0);" data-page="${i}" data-dept="${departmentId}">${i}</a>
+                                              </li>`;
+                        }
+
+                        paginationHtml += `<li class="page-item next ${currentPage === totalPages ? 'disabled' : ''}">
+                                              <a class="page-link dept-page" href="javascript:void(0);" data-page="${currentPage + 1}" data-dept="${departmentId}"><i class="tf-icon bx bx-chevron-right"></i></a>
+                                            </li>
+                                            <li class="page-item last ${currentPage === totalPages ? 'disabled' : ''}">
+                                              <a class="page-link dept-page" href="javascript:void(0);" data-page="${totalPages}" data-dept="${departmentId}"><i class="tf-icon bx bx-chevrons-right"></i></a>
+                                            </li>
+                                          </ul>
+                                        </nav>`;
+                        $('#pagination-controls').html(paginationHtml);
+                    }
                 }
             },
             error: function(xhr, status, error) {
-                console.error('Error fetching classes:', error);
-                alert('An error occurred. Please check the console for details.');
+                console.error("AJAX Error: " + status + ' - ' + error);
+                console.log('Response:', xhr.responseText);
+                $('#classTable tbody').empty();
+                $('#classTable tbody').append(
+                    '<tr><td colspan="6">Error loading classes. Please try again.</td></tr>'
+                );
+                $('#pagination-controls').empty();
+            }
+        });
+    });
+
+    // Handle pagination for department-filtered results
+    $(document).on('click', '.dept-page', function(e) {
+        e.preventDefault();
+        const page = $(this).data('page');
+        const departmentId = $(this).data('dept');
+        
+        $.ajax({
+            url: '../Database_users/Classes/show_classes.php',
+            type: 'GET',
+            dataType: 'json',
+            data: {
+                department_id: departmentId,
+                page: page,
+                per_page: 10
+            },
+            success: function(response) {
+                // Same rendering logic as viewClassesButton
+                const classes = response.classes || [];
+                $('#classTable tbody').empty();
+                
+                if (classes.length === 0) {
+                    $('#classTable tbody').append(
+                        '<tr><td colspan="6">No classes found for this department.</td></tr>'
+                    );
+                } else {
+                    classes.forEach(function(classData) {
+                        $('#classTable tbody').append(
+                            `<tr>
+                                <td>${classData.department_name}</td>
+                                <td>${classData.class_name}</td>
+                                <td>${classData.study_mode}</td>
+                                <td>${classData.semester}</td>
+                                <td>${classData.academic}</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-warning edit-btn" data-id="${classData.id}">Edit</button>
+                                    <button class="btn btn-sm btn-danger delete-btn" data-id="${classData.id}" data-name="${classData.class_name}">Delete</button>
+                                </td>
+                            </tr>`
+                        );
+                    });
+                }
             }
         });
     });
 });
-
 </script>
 </body>
 </html>

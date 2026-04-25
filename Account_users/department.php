@@ -1,14 +1,9 @@
 <?php
-session_start();
-
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-
-$faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
+include 'session_faculty.php';
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 ?>
-
 <!DOCTYPE html>
 <html lang="en" class="light-style layout-menu-fixed" dir="ltr" data-theme="theme-default" data-assets-path="../assets/" data-template="vertical-menu-template-free">
 <head>
@@ -16,21 +11,15 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
     <title>Department Management</title>
     <link rel="icon" type="image/x-icon" href="capital.png" />
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Icons. Uncomment required icon fonts -->
     <link rel="stylesheet" href="../assets/vendor/fonts/boxicons.css" />
-    <!-- Core CSS -->
     <link rel="stylesheet" href="../assets/vendor/css/core.css" class="template-customizer-core-css" />
     <link rel="stylesheet" href="../assets/vendor/css/theme-default.css" class="template-customizer-theme-css" />
     <link rel="stylesheet" href="../assets/css/demo.css" />
-    <!-- Vendors CSS -->
     <link rel="stylesheet" href="../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.css" />
     <link rel="stylesheet" href="../assets/vendor/libs/apex-charts/apex-charts.css" />
-    <!-- Page CSS -->
-    <!-- Helpers -->
     <script src="../assets/vendor/js/helpers.js"></script>
     <script src="../assets/js/config.js"></script>
     <style>
@@ -43,7 +32,6 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
     </style>
 </head>
 <body>
-    <!-- Toast Notifications -->
     <div class="toast-container">
         <div id="addSuccessToast" class="toast bg-success text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-success text-white">
@@ -52,11 +40,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                 <small>Just now</small>
                 <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
-            <div class="toast-body">
-                Department added successfully!
-            </div>
+            <div class="toast-body">Department added successfully!</div>
         </div>
-
         <div id="editSuccessToast" class="toast bg-warning text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-warning text-white">
                 <i class="bx bx-bell me-2"></i>
@@ -64,11 +49,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                 <small>Just now</small>
                 <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
-            <div class="toast-body">
-                Department edited successfully!
-            </div>
+            <div class="toast-body">Department edited successfully!</div>
         </div>
-
         <div id="deleteSuccessToast" class="toast bg-danger text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-danger text-white">
                 <i class="bx bx-bell me-2"></i>
@@ -76,11 +58,8 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                 <small>Just now</small>
                 <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
-            <div class="toast-body">
-                Department deleted successfully!
-            </div>
+            <div class="toast-body">Department deleted successfully!</div>
         </div>
-
         <div id="deleteConfirmToast" class="toast bg-warning text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-warning text-white">
                 <i class="bx bx-bell me-2"></i>
@@ -96,7 +75,6 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                 </div>
             </div>
         </div>
-
         <div id="departmentExistsToast" class="toast bg-warning text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-warning text-white">
                 <i class="bx bx-bell me-2"></i>
@@ -104,12 +82,9 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                 <small>Just now</small>
                 <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
-            <div class="toast-body">
-                Department already exists!
-            </div>
+            <div class="toast-body">Department already exists!</div>
         </div>
     </div>
-
     <div class="layout-wrapper layout-content-navbar">
         <div class="layout-container">
             <?php include 'menu.php'; ?>
@@ -122,9 +97,7 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                             <div class="card-body">
                                 <h5 class="card-title d-flex justify-content-between">
                                     Department List
-                                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">
-                                        Add Department
-                                    </button>
+                                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addDepartmentModal">Add Department</button>
                                 </h5>
                                 <table class="table" id="departmentTable">
                                     <thead>
@@ -133,14 +106,10 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                                             <th class="text-end">Actions</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
-                                        <!-- Department data will be inserted here via AJAX -->
-                                    </tbody>
+                                    <tbody></tbody>
                                 </table>
                             </div>
-                            <div class="pagination-container d-flex justify-content-center mt-2" id="pagination-controls">
-                                <!-- Pagination controls will be populated here by JavaScript -->
-                            </div>
+                            <div class="pagination-container d-flex justify-content-center mt-2" id="pagination-controls"></div>
                         </div>
                     </div>
                     <div class="content-backdrop fade"></div>
@@ -148,8 +117,6 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
             </div>
         </div>
     </div>
-
-    <!-- Add Department Modal -->
     <div class="modal fade" id="addDepartmentModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
@@ -161,11 +128,12 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                     <form id="addDepartmentForm">
                         <div class="mb-3">
                             <label for="departmentName" class="form-label">Department Name</label>
-                            <input type="text" class="form-control" id="departmentName" name="departmentName" placeholder=""required>
+                            <input type="text" class="form-control" id="departmentName" name="departmentName" required>
                         </div>
                         <div class="mb-3">
                             <label for="facultyName" class="form-label">Faculty Name</label>
                             <input type="text" class="form-control" id="facultyName" name="facultyName" value="<?php echo htmlspecialchars($faculty); ?>" readonly>
+                            <input type="hidden" id="facultyId" name="facultyId" value="<?php echo htmlspecialchars($faculty_id); ?>">
                         </div>
                         <button type="submit" class="btn btn-primary">Add Department</button>
                     </form>
@@ -173,8 +141,6 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
             </div>
         </div>
     </div>
-
-    <!-- Edit Department Modal -->
     <div class="modal fade" id="editDepartmentModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
@@ -192,6 +158,7 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
                         <div class="mb-3">
                             <label for="editFacultyName" class="form-label">Faculty Name</label>
                             <input type="text" class="form-control" id="editFacultyName" name="editFacultyName" readonly>
+                            <input type="hidden" id="editFacultyId" name="editFacultyId">
                         </div>
                         <button type="submit" class="btn btn-primary" id="saveChangesBtn">Save Changes</button>
                     </form>
@@ -199,25 +166,17 @@ $faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
             </div>
         </div>
     </div>
-
-    <!-- JavaScript imports -->
     <script src="../assets/vendor/libs/jquery/jquery.js"></script>
     <script src="../assets/vendor/libs/popper/popper.js"></script>
     <script src="../assets/vendor/js/bootstrap.js"></script>
     <script src="../assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.js"></script>
     <script src="../assets/vendor/js/menu.js"></script>
-    <!-- Vendors JS -->
     <script src="../assets/vendor/libs/apex-charts/apexcharts.js"></script>
-    <!-- Main JS -->
     <script src="../assets/js/main.js"></script>
-    <!-- Page JS -->
     <script src="../assets/js/dashboards-analytics.js"></script>
-    <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-
     <script>
 $(document).ready(function() {
-    // Initialize toasts
     var addSuccessToast = new bootstrap.Toast(document.getElementById('addSuccessToast'));
     var editSuccessToast = new bootstrap.Toast(document.getElementById('editSuccessToast'));
     var deleteSuccessToast = new bootstrap.Toast(document.getElementById('deleteSuccessToast'));
@@ -228,96 +187,58 @@ $(document).ready(function() {
         $.ajax({
             url: '../Database_users/Department/show_departments.php',
             type: 'GET',
-            data: {
-                page: page,
-                per_page: 4 // Number of items per page
-            },
+            data: { page: page, per_page: 4 },
+            dataType: 'json',
             success: function(response) {
-                const data = JSON.parse(response);
-                const departments = data.departments;
-                const totalPages = data.total_pages;
-                const currentPage = data.current_page;
-
+                const data = typeof response === 'string' ? JSON.parse(response) : response;
+                if (data.error) {
+                    $('#departmentTable tbody').html('<tr><td colspan="2">Error: ' + data.error + '</td></tr>');
+                    return;
+                }
+                const departments = data.departments || [];
+                const totalPages = data.total_pages || 1;
+                const currentPage = data.current_page || 1;
                 $('#departmentTable tbody').empty();
                 $('#pagination-controls').empty();
-
                 if (departments.length === 0) {
-                    $('#departmentTable tbody').append(
-                        '<tr><td colspan="2">No departments found.</td></tr>'
-                    );
+                    $('#departmentTable tbody').append('<tr><td colspan="2">No departments found.</td></tr>');
                 } else {
                     departments.forEach(function(department) {
-                        $('#departmentTable tbody').append(
-                            `<tr>
-                                <td>${department.department_name}</td>
-                                <td class="text-end">
-                                    <button class="btn btn-sm btn-warning edit-btn" onclick='editDepartment("${department.department_name}")'>Edit</button>
-                                    <button class="btn btn-sm btn-danger delete-btn" data-department-name="${department.department_name}">Delete</button>
-                                </td>
-                            </tr>`
-                        );
+                        $('#departmentTable tbody').append(`<tr><td>${department.department_name}</td><td class="text-end"><button class="btn btn-sm btn-warning edit-btn" onclick='editDepartment("${department.department_name}")'>Edit</button> <button class="btn btn-sm btn-danger delete-btn" data-department-name="${department.department_name}">Delete</button></td></tr>`);
                     });
-
-                    let paginationHtml = `<nav aria-label="Page navigation">
-                                              <ul class="pagination">
-                                                <li class="page-item first ${currentPage === 1 ? 'disabled' : ''}">
-                                                  <a class="page-link" href="javascript:void(0);" data-page="1"><i class="tf-icon bx bx-chevrons-left"></i></a>
-                                                </li>
-                                                <li class="page-item prev ${currentPage === 1 ? 'disabled' : ''}">
-                                                  <a class="page-link" href="javascript:void(0);" data-page="${currentPage - 1}"><i class="tf-icon bx bx-chevron-left"></i></a>
-                                                </li>`;
-
+                    let paginationHtml = `<nav><ul class="pagination"><li class="page-item first ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="javascript:void(0);" data-page="1"><i class="tf-icon bx bx-chevrons-left"></i></a></li><li class="page-item prev ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="javascript:void(0);" data-page="${currentPage - 1}"><i class="tf-icon bx bx-chevron-left"></i></a></li>`;
                     for (let i = 1; i <= totalPages; i++) {
-                        paginationHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-                                            <a class="page-link" href="javascript:void(0);" data-page="${i}">${i}</a>
-                                          </li>`;
+                        paginationHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}"><a class="page-link" href="javascript:void(0);" data-page="${i}">${i}</a></li>`;
                     }
-
-                    paginationHtml += `<li class="page-item next ${currentPage === totalPages ? 'disabled' : ''}">
-                                          <a class="page-link" href="javascript:void(0);" data-page="${currentPage + 1}"><i class="tf-icon bx bx-chevron-right"></i></a>
-                                        </li>
-                                        <li class="page-item last ${currentPage === totalPages ? 'disabled' : ''}">
-                                          <a class="page-link" href="javascript:void(0);" data-page="${totalPages}"><i class="tf-icon bx bx-chevrons-right"></i></a>
-                                        </li>
-                                      </ul>
-                                    </nav>`;
+                    paginationHtml += `<li class="page-item next ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="javascript:void(0);" data-page="${currentPage + 1}"><i class="tf-icon bx bx-chevron-right"></i></a></li><li class="page-item last ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="javascript:void(0);" data-page="${totalPages}"><i class="tf-icon bx bx-chevrons-right"></i></a></li></ul></nav>`;
                     $('#pagination-controls').html(paginationHtml);
                 }
             },
-            error: function(xhr, status, error) {
-                console.error("AJAX Error: " + status + ' - ' + error);
-                alert("An error occurred while fetching department data. Please try again.");
+            error: function(xhr) {
+                $('#departmentTable tbody').html('<tr><td colspan="2">Error loading departments</td></tr>');
             }
         });
     }
 
     $(document).on('click', '.page-link', function(e) {
         e.preventDefault();
-        const page = $(this).data('page');
-        fetchDepartmentList(page);
+        fetchDepartmentList($(this).data('page'));
     });
 
-    // Initial fetch of department list
-    // fetchDepartmentList();
+    fetchDepartmentList();
 
-    // Clear input when modal is closed
     $('#addDepartmentModal').on('hidden.bs.modal', function () {
         $('#addDepartmentForm')[0].reset();
     });
 
     $('#addDepartmentForm').on('submit', function(e) {
         e.preventDefault();
-        var formData = $(this).serialize();
         $.ajax({
             url: '../Database_users/Department/add_department.php',
             type: 'POST',
-            data: formData,
-            dataType: 'json',
-            beforeSend: function() {
-                $('button[type="submit"]').prop('disabled', true);
-            },
+            data: $(this).serialize(),
             success: function(response) {
-                $('button[type="submit"]').prop('disabled', false);
+                if (typeof response === 'string') response = JSON.parse(response);
                 if (response.status === 'success') {
                     $('#addDepartmentForm')[0].reset();
                     $('#addDepartmentModal').modal('hide');
@@ -326,49 +247,36 @@ $(document).ready(function() {
                 } else if (response.message === 'Department already exists') {
                     departmentExistsToast.show();
                 } else {
-                    alert("An error occurred: " + response.message);
+                    alert("Error: " + response.message);
                 }
             },
-            error: function(xhr, status, error) {
-                console.error("AJAX Error: " + status + ' - ' + error);
-                $('button[type="submit"]').prop('disabled', false);
-                alert("An error occurred while adding the department. Please try again.");
+            error: function() {
+                alert("An error occurred");
             }
         });
     });
 
     $(document).on('click', '.delete-btn', function() {
         var departmentName = $(this).data('department-name');
-        var deleteButton = $(this);
-        // Update the confirmation message
-        $('#deleteConfirmToast .toast-body').html(`
-            <p>Are you sure you want to delete the department <strong>"${departmentName}"</strong>?</p>
-            <p class="text-danger"><strong>This action cannot be undone and will permanently delete all data related to the department, including classes, students, subjects, and reports.</strong></p>
-            <div class="mt-3">
-                <button type="button" class="btn btn-danger me-2" id="confirmDelete">Delete Department</button>
-                <button type="button" class="btn btn-light" data-bs-dismiss="toast">Cancel</button>
-            </div>
-        `);
-
-        // Show the confirmation toast
+        $('#deleteConfirmToast .toast-body').html(`<p>Delete "${departmentName}"?</p><div class="mt-3"><button type="button" class="btn btn-danger me-2" id="confirmDelete">Delete</button><button type="button" class="btn btn-light" data-bs-dismiss="toast">Cancel</button></div>`);
         deleteConfirmToast.show();
-
-        // Handle the confirmation
         $('#confirmDelete').one('click', function() {
             deleteConfirmToast.hide();
-            
             $.ajax({
                 url: '../Database_users/Department/delete_department.php',
                 type: 'POST',
                 data: { department_name: departmentName },
+                dataType: 'json',
                 success: function(response) {
-                    console.log("Department deleted successfully:", response);
-                    fetchDepartmentList();
-                    deleteSuccessToast.show();
+                    if (response.status === 'success') {
+                        fetchDepartmentList();
+                        deleteSuccessToast.show();
+                    } else {
+                        alert("Error: " + response.message);
+                    }
                 },
-                error: function(xhr, status, error) {
-                    console.error("AJAX Error:", status, "-", error);
-                    alert("An error occurred while deleting the department. Please try again.");
+                error: function() {
+                    alert("An error occurred");
                 }
             });
         });
@@ -376,39 +284,35 @@ $(document).ready(function() {
 
     $(document).on('click', '.edit-btn', function() {
         var departmentName = $(this).closest('tr').find('td:first').text().trim();
-        var facultyName = "<?php echo htmlspecialchars($_SESSION['faculty']); ?>";
         $('#editDepartmentName').val(departmentName);
-        $('#editFacultyName').val(facultyName);
+        $('#editFacultyName').val("<?php echo htmlspecialchars($faculty); ?>");
+        $('#editFacultyId').val("<?php echo htmlspecialchars($faculty_id); ?>");
         $('#originalDepartmentName').val(departmentName);
         $('#editDepartmentModal').modal('show');
     });
 
     $('#editDepartmentForm').on('submit', function(e) {
         e.preventDefault();
-        var formData = $(this).serialize();
         $.ajax({
             url: '../Database_users/Department/edit_department.php',
             type: 'POST',
-            data: formData,
+            data: $(this).serialize(),
+            dataType: 'json',
             success: function(response) {
                 if (response.status === 'success') {
                     $('#editDepartmentModal').modal('hide');
                     fetchDepartmentList();
                     editSuccessToast.show();
                 } else {
-                    alert("An error occurred: " + response.message);
+                    alert("Error: " + response.message);
                 }
             },
-            error: function(xhr, status, error) {
-                console.error("AJAX Error: " + status + ' - ' + error);
-                alert("An error occurred while editing the department. Please try again.");
+            error: function() {
+                alert("An error occurred");
             }
         });
     });
-
-    fetchDepartmentList();
 });
 </script>
-
 </body>
 </html>

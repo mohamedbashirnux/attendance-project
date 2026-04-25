@@ -1,11 +1,5 @@
 <?php
-session_start();
-
-// Check if admin is logged in
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    echo json_encode(['success' => false, 'error' => 'Unauthorized']);
-    exit();
-}
+header('Content-Type: application/json');
 
 // Database connection using PDO
 include "../../connection/connect.php"; // Assuming this file is updated for PDO connection
@@ -20,10 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 
     try {
-        // Check if the new faculty name already exists
-        $checkQuery = "SELECT * FROM facultytable WHERE faculty_name = :facultyName";
+        // Check if the new faculty name already exists (excluding current record)
+        $checkQuery = "SELECT * FROM faculty WHERE faculty_name = :facultyName AND faculty_name != :oldName";
         $stmt = $conn->prepare($checkQuery);
         $stmt->bindParam(':facultyName', $editFacultyName);
+        $stmt->bindParam(':oldName', $originalFacultyName);
         $stmt->execute();
 
         if ($stmt->rowCount() > 0) {
@@ -32,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
 
         // Update faculty name
-        $updateQuery = "UPDATE facultytable SET faculty_name = :newName WHERE faculty_name = :oldName";
+        $updateQuery = "UPDATE faculty SET faculty_name = :newName WHERE faculty_name = :oldName";
         $stmt = $conn->prepare($updateQuery);
         $stmt->bindParam(':newName', $editFacultyName);
         $stmt->bindParam(':oldName', $originalFacultyName);

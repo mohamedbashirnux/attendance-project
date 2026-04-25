@@ -1,12 +1,14 @@
 <?php
-session_start();
+// Set timezone to Somalia (East Africa Time)
+date_default_timezone_set('Africa/Mogadishu');
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
+// Include the faculty session management
+include 'session_faculty.php';
 
-$faculty = $_SESSION['faculty'];
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 ?>
 <!DOCTYPE html>
 <html lang="en" class="light-style layout-menu-fixed" dir="ltr" data-theme="theme-default" data-assets-path="../assets/" data-template="vertical-menu-template-free">
@@ -14,7 +16,7 @@ $faculty = $_SESSION['faculty'];
     <!-- Meta tags, title, stylesheets, and scripts -->
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum=1.0" />
-    <title>Absents Management</title>
+    <title>Attendance Management</title>
     <link rel="icon" type="image/x-icon" href="capital.png" />
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -72,7 +74,7 @@ $faculty = $_SESSION['faculty'];
                 <!-- Content Wrapper -->
                 <div class="content-wrapper">
                     <div class="container-xxl flex-grow-1 container-p-y">
-                        <h4 class="fw-bold py-3 mb-4"> <i class='bx bx-bell-minus'></i> Absent Selection</h4>
+                        <h4 class="fw-bold py-3 mb-4"> <i class='bx bx-bell-minus'></i> Select Class for Attendance</h4>
 
                         <!-- Form Section -->
                         <div class="card">
@@ -81,33 +83,27 @@ $faculty = $_SESSION['faculty'];
                                     <div class="row">
                                         <div class="col-md-4 mb-3">
                                             <label for="departmentSelect" class="form-label">Department</label>
-                                            <select class="form-select" id="departmentSelect" name="department_name" required>
+                                            <select class="form-select" id="departmentSelect" name="department_id" required>
                                                 <option value="" disabled selected>Choose department</option>
                                                 <!-- Options populated dynamically -->
                                             </select>
                                         </div>
                                         <div class="col-md-4 mb-3">
                                             <label for="classSelect" class="form-label">Class</label>
-                                            <select class="form-select" id="classSelect" required>
+                                            <select class="form-select" id="classSelect" name="class_id" required>
                                                 <option value="" disabled selected>Choose a class</option>
                                                 <!-- Options populated dynamically based on selected department -->
                                             </select>
-                                            <input type="hidden" id="classNameHidden" name="class_name" />
-                                            <input type="hidden" id="classIdHidden" name="class_id" />
                                         </div>
                                         <div class="col-md-4 mb-3">
                                             <label for="faculty" class="form-label">Faculty</label>
-                                            <input type="text" class="form-control" id="faculty" name="faculty" readonly value="<?php echo $faculty; ?>">
+                                            <input type="text" class="form-control" id="faculty" name="faculty" readonly value="<?php echo htmlspecialchars($faculty); ?>">
+                                            <input type="hidden" name="faculty_id" value="<?php echo htmlspecialchars($faculty_id); ?>">
                                         </div>
                                     </div>
                                     <div class="row">
-                                        <input type="hidden" id="studyModeHidden" name="study_mode" />
-                                        <input type="hidden" id="semesterHidden" name="semester" />
-                                        <input type="hidden" id="academicHidden" name="academic" />
-                                    </div>
-                                    <div class="row">
                                         <div class="col-12 text-center">
-                                            <button type="submit" class="btn btn-primary">Go to Class Subjects</button>
+                                            <button type="submit" class="btn btn-primary">Go to Attendance Management</button>
                                         </div>
                                     </div>
                                 </form>
@@ -143,11 +139,36 @@ $faculty = $_SESSION['faculty'];
 
             // Populate departments dropdown on page load
             $.ajax({
-                url: '../Database_users/subject/fetch_departments.php',
+                url: '../Database_users/Department/show_departments.php?dropdown=true',
                 type: 'GET',
-                success: function(data) {
-                    $('#departmentSelect').html('<option value="" disabled selected>Choose department</option>' + data);
-                    $('#modalDepartmentSelect').html('<option value="" disabled selected>Choose department</option>' + data);
+                success: function(response) {
+                    try {
+                        // Handle both JSON and HTML responses
+                        let departments = [];
+                        if (typeof response === 'string') {
+                            // Try to parse as JSON first
+                            try {
+                                const jsonResponse = JSON.parse(response);
+                                departments = jsonResponse.departments || [];
+                            } catch (e) {
+                                // If not JSON, treat as HTML options
+                                $('#departmentSelect').html('<option value="" disabled selected>Choose department</option>' + response);
+                                return;
+                            }
+                        } else {
+                            departments = response.departments || [];
+                        }
+
+                        // Build options from JSON data
+                        let options = '<option value="" disabled selected>Choose department</option>';
+                        departments.forEach(function(dept) {
+                            options += `<option value="${dept.id}">${dept.department_name}</option>`;
+                        });
+                        $('#departmentSelect').html(options);
+                    } catch (error) {
+                        console.error('Error processing departments:', error);
+                        handleAjaxError(null, 'parse', error, 'departmentSelect', 'Error loading departments');
+                    }
                 },
                 error: function(jqXHR, textStatus, errorThrown) {
                     handleAjaxError(jqXHR, textStatus, errorThrown, 'departmentSelect', 'Error loading departments');
@@ -159,69 +180,43 @@ $faculty = $_SESSION['faculty'];
                 var departmentId = $(this).val();
                 if (!departmentId) {
                     $('#classSelect').html('<option value="" disabled selected>Choose a class</option>');
-                    $('#studyModeHidden').val('');
-                    $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
-                    return; // Exit early if no department selected
+                    return;
                 }
+
                 $.ajax({
-                    url: '../Database_users/subject/fetch_classes.php',
+                    url: '../Database_users/Classes/show_classes.php?dropdown=true&department_id=' + departmentId,
                     type: 'GET',
-                    data: { department_name: departmentId },
-                    success: function(data) {
-                        $('#classSelect').html('<option value="" disabled selected>Choose a class</option>' + data);
-                        $('#studyModeHidden').val('');
-                        $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>');
+                    success: function(response) {
+                        try {
+                            // Handle both JSON and HTML responses
+                            let classes = [];
+                            if (typeof response === 'string') {
+                                // Try to parse as JSON first
+                                try {
+                                    const jsonResponse = JSON.parse(response);
+                                    classes = jsonResponse.classes || [];
+                                } catch (e) {
+                                    // If not JSON, treat as HTML options
+                                    $('#classSelect').html('<option value="" disabled selected>Choose a class</option>' + response);
+                                    return;
+                                }
+                            } else {
+                                classes = response.classes || [];
+                            }
+
+                            // Build options from JSON data
+                            let options = '<option value="" disabled selected>Choose a class</option>';
+                            classes.forEach(function(cls) {
+                                options += `<option value="${cls.id}">${cls.class_name} (${cls.study_mode}) - ${cls.semester}</option>`;
+                            });
+                            $('#classSelect').html(options);
+                        } catch (error) {
+                            console.error('Error processing classes:', error);
+                            handleAjaxError(null, 'parse', error, 'classSelect', 'Error loading classes');
+                        }
                     },
                     error: function(jqXHR, textStatus, errorThrown) {
                         handleAjaxError(jqXHR, textStatus, errorThrown, 'classSelect', 'Error loading classes');
-                    }
-                });
-            });
-
-            // Handle change in class selection
-            $('#classSelect').change(function() {
-                var classId = $(this).val();
-                var className = $("#classSelect option:selected").data('class-name');
-                var departmentName = $('#departmentSelect option:selected').text();
-                var semester = $("#classSelect option:selected").data('semester');
-                var academic = $("#classSelect option:selected").data('academic'); // Get semester data from the option
-      
-                
-                // Set the hidden input fields with the class name and class ID
-                $('#semesterHidden').val(semester);
-                $('#academicHidden').val(academic);
-
-                $('#classNameHidden').val(className);
-                $('#classIdHidden').val(classId);
-
-                $.ajax({
-                    url: '../Database_users/allocate_update_teaher/fetch_study_mode1.php',
-                    type: 'GET',
-                    data: { class_id: classId },
-                    success: function(data) {
-                        var studyMode = data.trim();
-                        $('#studyModeHidden').val(studyMode);
-
-                        // Fetch subjects for selected class
-                        $.ajax({
-                            url: '../Database_users/allocate_update_teaher/fetch_sub_class.php',
-                            type: 'GET',
-                            data: {
-                                department_name: departmentName,
-                                class_name: className,
-                                study_mode: studyMode
-                            },
-                            success: function(data) {
-                                $('#subjectSelect').html('<option value="" disabled selected>Choose subject</option>' + data);
-                            },
-                            error: function(jqXHR, textStatus, errorThrown) {
-                                handleAjaxError(jqXHR, textStatus, errorThrown, 'subjectSelect', 'Error loading subjects');
-                            }
-                        });
-                    },
-                    error: function(jqXHR, textStatus, errorThrown) {
-                        console.error('Error fetching study mode:', textStatus, errorThrown);
-                        $('#studyModeHidden').val('');
                     }
                 });
             });

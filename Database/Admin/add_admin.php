@@ -1,52 +1,38 @@
 <?php
+header('Content-Type: application/json');
+
 include "../../connection/connect.php";
 
-$response = array();
-
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+try {
     $username = $_POST['username'];
-    $password = $_POST['password'];
+    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
 
-    // Validate inputs
-    if (empty($username) || empty($password)) {
-        $response['success'] = false;
-        $response['message'] = 'Username and Password cannot be empty!';
-    } else {
-        try {
-            // Check if username already exists
-            $check_query = "SELECT COUNT(*) AS count FROM admintable WHERE username = :username";
-            $check_stmt = $conn->prepare($check_query);
-            $check_stmt->bindParam(':username', $username, PDO::PARAM_STR);
-            $check_stmt->execute();
-            $row = $check_stmt->fetch(PDO::FETCH_ASSOC);
-            $existing_count = $row['count'];
+    // Check if username already exists
+    $checkSql = "SELECT * FROM super_admin WHERE username = :username";
+    $stmt = $conn->prepare($checkSql);
+    $stmt->bindParam(':username', $username);
+    $stmt->execute();
 
-            if ($existing_count > 0) {
-                $response['success'] = false;
-                $response['message'] = 'Username already exists!';
-            } else {
-                // Insert new admin
-                $insert_query = "INSERT INTO admintable (username, password) VALUES (:username, :password)";
-                $insert_stmt = $conn->prepare($insert_query);
-                $insert_stmt->bindParam(':username', $username, PDO::PARAM_STR);
-                $insert_stmt->bindParam(':password', $password, PDO::PARAM_STR); // Store password as plaintext
-
-                if ($insert_stmt->execute()) {
-                    $response['success'] = true;
-                    $response['message'] = 'Admin created successfully';
-                } else {
-                    $response['success'] = false;
-                    $response['message'] = 'Error: ' . $insert_stmt->errorInfo()[2];
-                }
-            }
-        } catch (PDOException $e) {
-            $response['success'] = false;
-            $response['message'] = 'Error: ' . $e->getMessage();
-        }
+    if ($stmt->rowCount() > 0) {
+        echo json_encode(['success' => false, 'message' => 'Username already exists!']);
+        exit();
     }
+
+    // Insert new admin
+    $insertSql = "INSERT INTO super_admin (username, password) VALUES (:username, :password)";
+    $stmt = $conn->prepare($insertSql);
+    $stmt->bindParam(':username', $username);
+    $stmt->bindParam(':password', $password);
+
+    if ($stmt->execute()) {
+        echo json_encode(['success' => true, 'message' => 'Admin added successfully']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Error adding admin']);
+    }
+
+} catch (PDOException $e) {
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 
-$conn = null; // Close the connection
-
-header('Content-Type: application/json');
-echo json_encode($response);
+$conn = null;
+?>

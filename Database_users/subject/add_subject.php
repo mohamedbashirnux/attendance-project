@@ -1,64 +1,82 @@
 <?php
-session_start();
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
 
-header('Content-Type: application/json');
+// Start output buffering to catch any unexpected output
+ob_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    echo json_encode(['success' => false, 'error' => 'User not logged in']);
-    exit();
-}
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
 
-// Database connection details
+// Include database connection
 include "../../connection/connect.php";
 
-// Check if POST data is received
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Sanitize input
-    $newSubject = isset($_POST['new_subject']) ? trim($_POST['new_subject']) : '';
-    $departmentName = isset($_POST['department_name']) ? trim($_POST['department_name']) : '';
-    $facultyName = isset($_POST['faculty_name']) ? trim($_POST['faculty_name']) : '';
+// Clear any unexpected output from includes
+ob_clean();
 
-    // Validate input data
-    if (empty($newSubject) || empty($departmentName) || empty($facultyName)) {
-        echo json_encode(['success' => false, 'error' => 'Missing required fields']);
+// Set content type to JSON
+header('Content-Type: application/json');
+
+try {
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
+    }
+
+    $faculty_id = $sessionInfo['faculty_id'];
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    $subject_name = trim($_POST['subject_name'] ?? '');
+    $department_id = trim($_POST['department_id'] ?? '');
+
+    // Validate input
+    if (empty($subject_name) || empty($department_id)) {
+        throw new Exception("Subject name and department are required");
+    }
+
+    // Verify department belongs to this faculty
+    $verify_sql = "SELECT id FROM departments WHERE id = ? AND faculty_id = ?";
+    $verify_stmt = $conn->prepare($verify_sql);
+    $verify_stmt->execute([$department_id, $faculty_id]);
+    
+    if ($verify_stmt->rowCount() === 0) {
+        throw new Exception("Invalid department selected");
+    }
+
+    // Check if subject already exists in this department
+    $check_sql = "SELECT id FROM subjects WHERE subject_name = ? AND department_id = ? AND faculty_id = ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->execute([$subject_name, $department_id, $faculty_id]);
+
+    if ($check_stmt->rowCount() > 0) {
+        echo json_encode(['success' => false, 'message' => 'Subject already exists in this department']);
         exit();
     }
 
-    try {
-        $conn->beginTransaction();
+    // Insert new subject
+    $sql = "INSERT INTO subjects (faculty_id, department_id, subject_name) VALUES (?, ?, ?)";
+    $stmt = $conn->prepare($sql);
 
-        // Check if the subject already exists for the specified class and department
-        $checkSql = "SELECT * FROM subjects WHERE subject_name = :subject_name AND department_name = :department_name";
-        $checkStmt = $conn->prepare($checkSql);
-        $checkStmt->execute([':subject_name' => $newSubject, ':department_name' => $departmentName]);
-
-        if ($checkStmt->rowCount() > 0) {
-            // Subject already exists for this class and department
-            echo json_encode(['success' => false, 'error' => 'Subject already exists for this class and department']);
-            $conn->rollBack();
-            exit();
-        }
-
-        // Insert the new subject
-        $insertSql = "INSERT INTO subjects (subject_name, department_name, faculty_name) VALUES (:subject_name, :department_name, :faculty_name)";
-        $insertStmt = $conn->prepare($insertSql);
-
-        if ($insertStmt->execute([
-            ':subject_name' => $newSubject,
-            ':department_name' => $departmentName,
-            ':faculty_name' => $facultyName
-        ])) {
-            $conn->commit();
-            echo json_encode(['success' => true]);
-        } else {
-            throw new Exception("Failed to insert subject.");
-        }
-    } catch (Exception $e) {
-        $conn->rollBack();
-        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    if (!$stmt->execute([$faculty_id, $department_id, $subject_name])) {
+        $errorInfo = $stmt->errorInfo();
+        throw new Exception("Database error: " . $errorInfo[2]);
     }
-} else {
-    echo json_encode(['success' => false, 'error' => 'Invalid request method']);
+
+    ob_clean();
+    echo json_encode(["success" => true, "message" => "Subject added successfully"]);
+
+} catch (Exception $e) {
+    ob_clean();
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

@@ -1,37 +1,128 @@
 <?php
-// Include the database connection
+// Include the database connection and session management
 include "../connection/connect.php";
+include "session_faculty.php";
 
 // Initialize variables
 $student_id = isset($_GET['student_id']) ? $_GET['student_id'] : '';
 $faculty = isset($_GET['faculty']) ? $_GET['faculty'] : '';
 
 try {
-    // Fetch student information
+    // Fetch student information using the new normalized structure
     $stmt_student = $conn->prepare("
-    SELECT student_id, student_name, department_name, class_name, c_id, study_mode,password
-    FROM students 
-    WHERE student_id = :student_id AND faculty_name = :faculty_name
+        SELECT s.student_id, s.full_name, s.status, d.department_name, c.class_name, c.id as class_id, c.study_mode, c.semester, c.academic_year
+        FROM students s 
+        JOIN classes c ON s.class_id = c.id
+        JOIN departments d ON c.department_id = d.id
+        WHERE s.student_id = :student_id
     ");
     $stmt_student->bindParam(':student_id', $student_id, PDO::PARAM_STR);
-    $stmt_student->bindParam(':faculty_name', $faculty, PDO::PARAM_STR);
     $stmt_student->execute();
     $student_info = $stmt_student->fetch(PDO::FETCH_ASSOC);
 
-    // Prepare the SQL statement for absents
+    // Get attendance statistics from attendance_sessions table
+    $attendance_stats = [];
+    if ($student_info) {
+        // First, get all subjects for this class
+        $stats_stmt = $conn->prepare("
+            SELECT 
+                subj.subject_name,
+                subj.id as subject_id,
+                COUNT(ats.id) as total_sessions,
+                -- Calculate attended sessions based on present_students from attendance_sessions
+                SUM(CASE 
+                    WHEN ats.present_students > 0 AND EXISTS (
+                        SELECT 1 FROM students s WHERE s.student_id = :student_id AND s.class_id = ats.class_id
+                    ) THEN 1 
+                    ELSE 0 
+                END) as attended_sessions_estimate,
+                -- Calculate absent sessions from absences table
+                COALESCE((
+                    SELECT COUNT(*) 
+                    FROM absences a 
+                    WHERE a.student_id = (SELECT id FROM students WHERE student_id = :student_id) 
+                    AND a.subject_class_id = sc.id
+                ), 0) as absent_sessions
+            FROM subject_class sc
+            JOIN subjects subj ON sc.subject_id = subj.id
+            LEFT JOIN attendance_sessions ats ON ats.subject_class_id = sc.id AND ats.class_id = :class_id
+            WHERE sc.class_id = :class_id
+            GROUP BY subj.id, subj.subject_name
+            ORDER BY subj.subject_name ASC
+        ");
+        $stats_stmt->bindParam(':student_id', $student_id, PDO::PARAM_STR);
+        $stats_stmt->bindParam(':class_id', $student_info['class_id'], PDO::PARAM_INT);
+        $stats_stmt->execute();
+        $temp_stats = $stats_stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Process the results to calculate proper attendance
+        foreach ($temp_stats as $stat) {
+            $total_sessions = (int)$stat['total_sessions'];
+            $absent_sessions = (int)$stat['absent_sessions'];
+            $attended_sessions = max(0, $total_sessions - $absent_sessions);
+            
+            // Calculate attendance percentage
+            if ($total_sessions > 0) {
+                // If there are sessions, calculate based on attended vs total
+                $attendance_percentage = round(($attended_sessions / $total_sessions) * 100, 2);
+            } else {
+                // If no sessions yet, show 100% (perfect attendance)
+                $attendance_percentage = 100.00;
+            }
+            
+            $attendance_stats[] = [
+                'subject_name' => $stat['subject_name'],
+                'total_sessions' => $total_sessions,
+                'attended_sessions' => $attended_sessions,
+                'absent_sessions' => $absent_sessions,
+                'attendance_percentage' => $attendance_percentage
+            ];
+        }
+    }
+
+    // Prepare the SQL statement for absences using the new structure
     $stmt = $conn->prepare("
-    SELECT * FROM absents 
-    WHERE student_id = :student_id AND faculty_name = :faculty_name
-    ORDER BY subject_name ASC;
+        SELECT a.*, s.full_name as student_name, s.student_id as student_varchar_id, 
+               subj.subject_name, c.class_name, c.study_mode, d.department_name,
+               t.full_name as teacher_name, a.absence_date, a.excuse
+        FROM absences a 
+        JOIN students s ON a.student_id = s.id
+        JOIN classes c ON a.class_id = c.id
+        JOIN departments d ON c.department_id = d.id
+        JOIN subject_class sc ON a.subject_class_id = sc.id
+        JOIN subjects subj ON sc.subject_id = subj.id
+        JOIN teachers t ON a.teacher_id = t.id
+        WHERE s.student_id = :student_id
+        ORDER BY subj.subject_name ASC, a.absence_date DESC
     ");
 
-    // Bind the student_id and faculty_name parameters
+    // Bind the student_id parameter
     $stmt->bindParam(':student_id', $student_id, PDO::PARAM_STR);
-    $stmt->bindParam(':faculty_name', $faculty, PDO::PARAM_STR);
 
     // Execute the statement
     $stmt->execute();
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // If no results found in new structure, try to use old absents table as fallback
+    if (empty($results)) {
+        try {
+            $fallback_stmt = $conn->prepare("
+                SELECT student_id as student_varchar_id, student_name, subject_name, class_name, 
+                       department_name, study_mode, absent_date as absence_date, 
+                       excuses as excuse, 'Unknown' as teacher_name,
+                       CONCAT('old_', student_id, '_', absent_date) as id
+                FROM absents 
+                WHERE student_id = :student_id
+                ORDER BY subject_name ASC, absent_date DESC
+            ");
+            $fallback_stmt->bindParam(':student_id', $student_id, PDO::PARAM_STR);
+            $fallback_stmt->execute();
+            $results = $fallback_stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            // Old table doesn't exist, that's fine
+            $results = [];
+        }
+    }
 
     // Group the results by subject_name
     $grouped_results = [];
@@ -41,7 +132,7 @@ try {
 
     // Optional: Handle case where no results are found
     if (empty($results)) {
-        // echo "No records found for the provided student ID and faculty.";
+        // echo "No records found for the provided student ID.";
     }
 } catch (PDOException $e) {
     // Handle any errors
@@ -165,19 +256,74 @@ try {
                             <div class="student-info">
                             <?php if ($student_info): ?>
     <p><strong>Student ID:</strong> <?php echo htmlspecialchars($student_info['student_id']); ?></p>
-    <p><strong>Name:</strong> <?php echo htmlspecialchars($student_info['student_name']); ?></p>
-
-    <!-- Display Class Name and Study Mode on the same line -->
-    <p><strong>Class:</strong> <?php echo htmlspecialchars($student_info['class_name']) . ' (' . htmlspecialchars($student_info['study_mode']) . ')'; ?></p>
-
+    <p><strong>Student Name:</strong> <?php echo htmlspecialchars($student_info['full_name']); ?></p>
+    <p><strong>Status:</strong> 
+        <?php 
+        $statusClass = $student_info['status'] === 'approved' ? 'bg-success' : 'bg-warning';
+        $statusText = ucfirst($student_info['status']);
+        ?>
+        <span class="badge <?php echo $statusClass; ?>"><?php echo $statusText; ?></span>
+    </p>
+    <p><strong>Faculty:</strong> <?php echo htmlspecialchars($sessionInfo['faculty_name']); ?></p>
     <p><strong>Department:</strong> <?php echo htmlspecialchars($student_info['department_name']); ?></p>
-    <p><strong>Password:</strong> <?php echo htmlspecialchars($student_info['password']); ?></p>
+    <p><strong>Semester:</strong> <?php echo htmlspecialchars($student_info['semester']); ?></p>
+    <p><strong>Class Name:</strong> <?php echo htmlspecialchars($student_info['class_name']); ?></p>
+    <p><strong>Study Mode:</strong> <?php echo htmlspecialchars($student_info['study_mode']); ?></p>
+    <p><strong>Academic Year:</strong> <?php echo htmlspecialchars($student_info['academic_year']); ?></p>
 <?php else: ?>
     <p>No student information found.</p>
 <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
 
-
-
+                    <!-- Attendance Statistics Card -->
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">Attendance Statistics by Subject</h5>
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Subject Name</th>
+                                            <th>Total Sessions</th>
+                                            <th>Attended</th>
+                                            <th>Absent</th>
+                                            <th>Attendance %</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (!empty($attendance_stats)): ?>
+                                            <?php foreach ($attendance_stats as $stat): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($stat['subject_name']); ?></td>
+                                                    <td><span class="badge bg-info"><?php echo $stat['total_sessions']; ?></span></td>
+                                                    <td><span class="badge bg-success"><?php echo $stat['attended_sessions']; ?></span></td>
+                                                    <td><span class="badge bg-danger"><?php echo $stat['absent_sessions']; ?></span></td>
+                                                    <td>
+                                                        <span class="badge <?php echo $stat['attendance_percentage'] >= 75 ? 'bg-success' : ($stat['attendance_percentage'] >= 50 ? 'bg-warning' : 'bg-danger'); ?>">
+                                                            <?php echo $stat['attendance_percentage']; ?>%
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <?php if ($stat['attendance_percentage'] >= 75): ?>
+                                                            <span class="badge bg-success">Good</span>
+                                                        <?php elseif ($stat['attendance_percentage'] >= 50): ?>
+                                                            <span class="badge bg-warning">Average</span>
+                                                        <?php else: ?>
+                                                            <span class="badge bg-danger">Poor</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="6" class="text-center">No subjects found for this student's class.</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -215,33 +361,34 @@ try {
             $rowClass = ($index % 2 == 0) ? 'subject-group' : '';
             
             echo '<tr class="' . $rowClass . ' text-capitalize">';
-            echo '<td>' . htmlspecialchars($student['student_id']) . '</td>';
+            echo '<td>' . htmlspecialchars($student['student_varchar_id']) . '</td>';
             echo '<td>' . htmlspecialchars($student['student_name']) . '</td>';
             echo '<td>' . htmlspecialchars($student['subject_name']) . '</td>';
-            echo '<td>' . htmlspecialchars($student['class_name']) . '</td>';
-            echo '<td>' . htmlspecialchars($student['absent_date']) . '</td>';
-            echo '<td>' . htmlspecialchars($student['excuses']) . '</td>';
+            echo '<td>' . htmlspecialchars($student['class_name']) . ' (' . htmlspecialchars($student['study_mode']) . ')</td>';
+            echo '<td>' . htmlspecialchars($student['absence_date']) . '</td>';
+            echo '<td>' . htmlspecialchars($student['excuse']) . '</td>';
             echo '<td class="text-end">
                 <!-- Edit Button -->
                 <button class="btn btn-sm btn-warning edit-btn" 
-                    data-student-id="' . htmlspecialchars($student['student_id']) . '"
+                    data-student-id="' . htmlspecialchars($student['student_varchar_id']) . '"
                     data-student-name="' . htmlspecialchars($student['student_name']) . '"
                     data-subject-name="' . htmlspecialchars($student['subject_name']) . '"
                     data-class-name="' . htmlspecialchars($student['class_name']) . '"
-                    data-absent-date="' . htmlspecialchars($student['absent_date']) . '"
-                    data-excuses="' . htmlspecialchars($student['excuses']) . '"
+                    data-absent-date="' . htmlspecialchars($student['absence_date']) . '"
+                    data-excuses="' . htmlspecialchars($student['excuse']) . '"
                     data-department-name="' . htmlspecialchars($student['department_name']) . '"
-                    data-study-mode="' . htmlspecialchars($student['study_mode']) . '">
+                    data-study-mode="' . htmlspecialchars($student['study_mode']) . '"
+                    data-absence-id="' . htmlspecialchars($student['id']) . '">
                     Edit
                 </button>
                 
                 <!-- Delete Button -->
                 <button class="btn btn-sm btn-danger delete-btn" 
-                    data-id="' . htmlspecialchars($student['student_id']) . '"
+                    data-id="' . htmlspecialchars($student['id']) . '"
                     data-student-name="' . htmlspecialchars($student['student_name']) . '"
                     data-subject="' . htmlspecialchars($student['subject_name']) . '"
                     data-class="' . htmlspecialchars($student['class_name']) . '"
-                    data-absent-date="' . htmlspecialchars($student['absent_date']) . '">
+                    data-absent-date="' . htmlspecialchars($student['absence_date']) . '">
                     Delete
                 </button>
             </td>';
@@ -249,10 +396,9 @@ try {
         }
     }
 } else {
-    echo '<tr><td colspan="7" class="text-center">No Absents Found.</td></tr>';
+    echo '<tr><td colspan="7" class="text-center">No Absences Found.</td></tr>';
 }
 ?>
-
                                     </tbody>
                                 </table>
                             </div>
@@ -307,11 +453,12 @@ try {
                     <div class="mb-3">
                         <label class="form-label">Excuses</label>
                         <select class="form-select" id="editExcuses" name="excuses" required>
-                            <option value="Bilaa cudur daar">bilaa cudur daar</option>
-                            <option value="Medical">Medical</option>
                             <option value="Family Emergency">Family Emergency</option>
-                            <option value="Personal reasons">Personal reasons</option>
-                            
+                            <option value="Medical Appointment">Medical Appointment</option>
+                            <option value="Personal Reason">Personal Reason</option>
+                            <option value="Official Duty">Official Duty</option>
+                            <option value="Other">Other</option>
+                            <option value="No Excuse">No Excuse</option>
                         </select>
                     </div>
                 </form>
@@ -362,15 +509,12 @@ try {
             document.getElementById('confirmDelete').addEventListener('click', function() {
                 deleteConfirmToast.hide();
                 
-                // Send delete request
+                // Send delete request using the absence ID
                 $.ajax({
                     url: '../Database_users/absent/delete_student.php',
                     type: 'POST',
                     data: {
-                        student_id: studentId,
-                        subject_name: subjectName,
-                        class_name: className,
-                        absent_date: absentDate
+                        id: studentId // This is now the absence record ID
                     },
                     success: function(response) {
                         // Show success toast
@@ -403,9 +547,10 @@ try {
             const className = this.getAttribute('data-class-name');
             const absentDate = this.getAttribute('data-absent-date');
             const excuses = this.getAttribute('data-excuses');
+            const absenceId = this.getAttribute('data-absence-id'); // Get the absence record ID
 
             // Populate modal fields
-            document.getElementById('editStudentId').value = studentId;
+            document.getElementById('editStudentId').value = absenceId; // Store absence ID instead
             document.getElementById('editStudentIdDisplay').value = studentId;
             document.getElementById('editStudentName').value = studentName;
             document.getElementById('editSubjectName').value = subjectName;
@@ -424,10 +569,7 @@ try {
 
     // Handle save button click
     document.getElementById('saveExcusesButton').addEventListener('click', function() {
-        const studentId = document.getElementById('editStudentId').value;
-        const subjectName = document.getElementById('editSubjectName').value;
-        const className = document.getElementById('editClassName').value;
-        const absentDate = document.getElementById('editAbsentDate').value;
+        const absenceId = document.getElementById('editStudentId').value; // This is now the absence ID
         const newExcuses = document.getElementById('editExcuses').value;
 
         // Send AJAX request to update excuses
@@ -435,10 +577,7 @@ try {
             url: '../Database_users/absent/update_excuses.php',
             type: 'POST',
             data: {
-                student_id: studentId,
-                subject_name: subjectName,
-                class_name: className,
-                absent_date: absentDate,
+                absence_id: absenceId, // Use absence_id instead of multiple fields
                 excuses: newExcuses
             },
             success: function(response) {

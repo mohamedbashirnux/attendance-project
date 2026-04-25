@@ -1,37 +1,33 @@
 <?php
+header('Content-Type: application/json');
+
 include "../../connection/connect.php";
 
-$response = array();
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $username = $_POST['username'];
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $usernameToDelete = $_POST['username'];
-
-    if (empty($usernameToDelete)) {
-        $response['success'] = false;
-        $response['message'] = 'Username cannot be empty!';
-    } else {
-        try {
-            // Delete the admin record
-            $delete_query = "DELETE FROM admintable WHERE username = :username";
-            $delete_stmt = $conn->prepare($delete_query);
-            $delete_stmt->bindParam(':username', $usernameToDelete, PDO::PARAM_STR);
-
-            if ($delete_stmt->execute()) {
-                $response['success'] = true;
-                $response['message'] = 'Admin deleted successfully';
-            } else {
-                $response['success'] = false;
-                $response['message'] = 'Error: ' . $delete_stmt->errorInfo()[2];
-            }
-        } catch (PDOException $e) {
-            $response['success'] = false;
-            $response['message'] = 'Error: ' . $e->getMessage();
-        }
+    if (empty($username)) {
+        echo json_encode(['success' => false, 'message' => 'Username is required']);
+        exit();
     }
+
+    $sql = "DELETE FROM super_admin WHERE username = :username";
+
+    try {
+        $stmt = $conn->prepare($sql);
+        $stmt->bindParam(':username', $username);
+
+        if ($stmt->execute()) {
+            echo json_encode(['success' => true, 'message' => 'Admin deleted successfully']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Error deleting admin']);
+        }
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => 'Error deleting admin: ' . $e->getMessage()]);
+    }
+} else {
+    echo json_encode(['success' => false, 'message' => 'Invalid request method']);
 }
 
-$conn = null; // Close the connection
-
-header('Content-Type: application/json');
-echo json_encode($response);
+$conn = null;
 ?>
