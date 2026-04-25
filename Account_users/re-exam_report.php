@@ -1,60 +1,86 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
+
+include "../connection/connect.php";
+
+// Get the required parameters from the URL
+$class_id = $_GET['class_id'] ?? '';
+$department_id = $_GET['department_id'] ?? '';
+$faculty_id_param = $_GET['faculty_id'] ?? $faculty_id;
+
+// Validate required parameters
+if (empty($class_id)) {
+    header("Location: selection_Absents.php");
     exit();
 }
 
-$faculty = isset($_SESSION['faculty']) ? $_SESSION['faculty'] : '';
+try {
+    // Get class information
+    $class_sql = "SELECT c.class_name, c.study_mode, c.semester, c.academic_year, d.department_name
+                  FROM classes c 
+                  JOIN departments d ON c.department_id = d.id 
+                  WHERE c.id = ?";
+    $class_stmt = $conn->prepare($class_sql);
+    $class_stmt->execute([$class_id]);
+    $class_info = $class_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$class_info) {
+        header("Location: selection_Absents.php");
+        exit();
+    }
 
-include "../connection/connect.php";
-// Get the required parameters from the URL
-$class_name = $_GET['class_name'];
-$department_name = $_GET['department_name'];
-$study_mode = $_GET['study_mode'];
-$semester = $_GET['semester'];
-$academic = $_GET['academic'];
-$faculty = $_GET['faculty'];
+    // Extract class information
+    $class_name = $class_info['class_name'];
+    $department_name = $class_info['department_name'];
+    $study_mode = $class_info['study_mode'];
+    $semester = $class_info['semester'];
+    $academic_year = $class_info['academic_year'];
+    $faculty_name = $faculty; // Use session faculty name
 
-// Prepare and execute the SQL query for the exam report
-$stmt = $conn->prepare("
-SELECT 
-    absents.*,
-    CONCAT('Absent- ', FORMAT((COUNT(*) / total_days_table.total_days * 10), 1), '%') AS absence_percentage
-FROM 
-    absents
-INNER JOIN (
+    // Prepare and execute the SQL query for the exam report
+    // Students who missed 3 or more times in one subject
+    $stmt = $conn->prepare("
     SELECT 
-        student_name,
-        subject_name,
-        COUNT(DISTINCT student_name) AS total_days
-    FROM
-        absents
+        s.student_id,
+        s.full_name as student_name,
+        subj.subject_name,
+        COUNT(a.id) AS absence_count
+    FROM 
+        absences a
+    INNER JOIN students s ON a.student_id = s.id
+    INNER JOIN subject_class sc ON a.subject_class_id = sc.id
+    INNER JOIN subjects subj ON sc.subject_id = subj.id
     WHERE
-        class_name = :class_name AND department_name = :department_name AND study_mode = :study_mode
+        a.class_id = ?
     GROUP BY 
-        student_name, subject_name
-) AS total_days_table 
-ON absents.student_name = total_days_table.student_name AND absents.subject_name = total_days_table.subject_name
-GROUP BY 
-    absents.subject_name, absents.student_name
-HAVING 
-    (COUNT(*) / (SELECT total_days FROM (SELECT student_name, subject_name, COUNT(DISTINCT student_name) AS total_days  FROM absents WHERE class_name = :class_name AND department_name = :department_name AND study_mode = :study_mode GROUP BY student_name, subject_name) AS total_days_table_internal WHERE total_days_table_internal.student_name = absents.student_name AND total_days_table_internal.subject_name = absents.subject_name) * 10) >= 30
-ORDER BY 
-    absents.student_name ASC;
-");
+        s.id, s.student_id, s.full_name, subj.subject_name
+    HAVING 
+        absence_count >= 3
+    ORDER BY 
+        s.full_name ASC, subj.subject_name ASC
+    ");
 
-$stmt->bindParam(':class_name', $class_name);
-$stmt->bindParam(':department_name', $department_name);
-$stmt->bindParam(':study_mode', $study_mode);
+    $stmt->execute([$class_id]);
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$stmt->execute();
-$results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    echo "Error: " . $e->getMessage();
+    exit();
+}
 
 // Count unique students
-$unique_students = array_unique(array_column($results, 'student_name'));
+$unique_students = [];
+foreach ($results as $row) {
+    $unique_students[$row['student_id']] = $row['student_name'];
+}
 $total_students = count($unique_students);
+$total_records = count($results); // Total student-subject combinations
 
 ?>
 
@@ -138,34 +164,34 @@ $total_students = count($unique_students);
             <div class="content-wrapper">
                 <div class="container-xxl flex-grow-1 container-p-y">
                     <div class="d-flex align-items-center mb-4">
-                        <a href="absents.php" class="btn btn-secondary me-3"><i class='bx bx-arrow-back'></i></a>
+                        <a href="absents.php?class_id=<?php echo urlencode($class_id); ?>&department_id=<?php echo urlencode($department_id); ?>&faculty_id=<?php echo urlencode($faculty_id); ?>" class="btn btn-secondary me-3"><i class='bx bx-arrow-back'></i></a>
                         <h4 class="fw-bold m-0">Absent RE-EXAM REPORT</h4>
                     </div>
                     <div class="d-flex card-body bg-white">
                         <div class="d-flex flex-column">
                             <div>
-                                <strong>Class Name:</strong> <?php echo $class_name .' ('.$study_mode. ')'; ?>
+                                <strong>Class Name:</strong> <?php echo htmlspecialchars($class_name) . ' (' . htmlspecialchars($study_mode) . ')'; ?>
                             </div>
                             <div>
-                                <strong>Semester:</strong> <?php echo $semester; ?>
+                                <strong>Semester:</strong> <?php echo htmlspecialchars($semester); ?>
                             </div>
                             <div>
-                                <strong>Departments Name:</strong> <?php echo $department_name; ?>
+                                <strong>Department Name:</strong> <?php echo htmlspecialchars($department_name); ?>
                             </div>
                             <div>
-                                <strong>Academic Year:</strong> <?php echo $academic; ?>
+                                <strong>Academic Year:</strong> <?php echo htmlspecialchars($academic_year); ?>
                             </div>
                             <div>
-                                <strong>Faculty Name:</strong> <?php echo $faculty; ?>
+                                <strong>Faculty Name:</strong> <?php echo htmlspecialchars($faculty_name); ?>
                             </div>
-                            <div><strong>Total Number of Students:</strong> <?php echo $total_students; ?></div>
+                            <div><strong>Total Students Requiring Re-exam:</strong> <?php echo $total_students; ?></div>
                         </div>
                     </div>
                     <div class="card mt-4">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center mb-4">
                                 <div class="btn-group">
-                                    <a class="dropdown-item btn btn-primary" href="download_exam_report.php?class_name=<?php echo urlencode($class_name); ?>&department_name=<?php echo urlencode($department_name); ?>&study_mode=<?php echo urlencode($study_mode); ?>&semester=<?php echo urlencode($semester); ?>&academic=<?php echo urlencode($academic); ?>&faculty=<?php echo urlencode($faculty); ?>"> Exam Report </a>
+                                    <a class="dropdown-item btn btn-primary" href="download_exam_report.php?class_id=<?php echo urlencode($class_id); ?>&department_id=<?php echo urlencode($department_id); ?>&faculty_id=<?php echo urlencode($faculty_id); ?>"> Exam Report </a>
                                 </div>
                             </div>
 
@@ -177,7 +203,7 @@ $total_students = count($unique_students);
                                             <th>Student id</th>
                                             <th>Student Name</th>
                                             <th>Subject Name</th>
-                                            <th>Absence Percentage</th>
+                                            <th>Absences</th>
                                         </tr>
                                     </thead>
                                     <tbody id="studentTableBody">
@@ -204,19 +230,17 @@ $total_students = count($unique_students);
                                             echo '<td>' . htmlspecialchars($student['student_name']) . '</td>';
                                             echo '<td>' . htmlspecialchars($student['subject_name']) . '</td>';
 
-                                            // Determine badge color based on absence percentage
-                                            $percentage_value = floatval(str_replace(['Absent- ', '%'], '', $student['absence_percentage']));
-                                            $badge_color = 'success';
+                                            // Determine badge color based on absence count
+                                            $absence_count = intval($student['absence_count']);
+                                            $badge_color = 'danger'; // Default to red
 
-                                            if ($percentage_value == 10) {
-                                                $badge_color = 'success';
-                                            } elseif ($percentage_value == 20) {
-                                                $badge_color = 'warning';
-                                            } elseif ($percentage_value >= 30) {
-                                                $badge_color = 'danger';
+                                            if ($absence_count >= 5) {
+                                                $badge_color = 'danger'; // Red for 5+ absences
+                                            } elseif ($absence_count >= 3) {
+                                                $badge_color = 'warning'; // Orange for 3-4 absences
                                             }
 
-                                            echo '<td><span class="badge bg-' . $badge_color . '">' . htmlspecialchars($student['absence_percentage']) . '</span></td>';
+                                            echo '<td><span class="badge bg-' . $badge_color . '">' . $absence_count . ' times</span></td>';
                                             echo '</tr>';
 
                                             $previous_student = $current_student;

@@ -48,37 +48,23 @@ try {
     
     $subject_class_id = $subjectClassInfo['subject_class_id'];
 
-    // Get date range parameters (optional)
-    $start_date = isset($_GET['start_date']) && !empty($_GET['start_date']) ? $_GET['start_date'] : null;
-    $end_date = isset($_GET['end_date']) && !empty($_GET['end_date']) ? $_GET['end_date'] : null;
+    // Get total sessions for this subject
+    $total_sessions_sql = "SELECT COUNT(*) as total_sessions 
+                          FROM attendance_sessions 
+                          WHERE class_id = ? AND subject_class_id = ?";
+    $total_stmt = $conn->prepare($total_sessions_sql);
+    $total_stmt->execute([$class_id, $subject_class_id]);
+    $total_sessions_result = $total_stmt->fetch(PDO::FETCH_ASSOC);
+    $total_sessions = $total_sessions_result['total_sessions'];
 
-    // Build date condition for the query  
-    $date_condition = "";
-    $params = [$class_id, $subject_class_id];
-
-    // Handle date filtering
-    if ($start_date || $end_date) {
-        if ($start_date && $end_date) {
-            $date_condition = " AND a.absence_date >= ? AND a.absence_date <= ?";
-            $params[] = $start_date;
-            $params[] = $end_date;
-        } elseif ($start_date) {
-            $date_condition = " AND a.absence_date >= ?";
-            $params[] = $start_date;
-        } elseif ($end_date) {
-            $date_condition = " AND a.absence_date <= ?";
-            $params[] = $end_date;
-        }
-    }
-
-    // Build the complete SQL query
+    // Build the SQL query to find students who never attended
     $sql = "
     SELECT 
         s.student_id,
         s.full_name as student_name,
         subj.subject_name,
         COUNT(a.id) AS absence_count,
-        GROUP_CONCAT(a.absence_date ORDER BY a.absence_date ASC SEPARATOR ', ') AS absent_dates
+        ? as total_sessions
     FROM
         absences a
     INNER JOIN students s ON a.student_id = s.id
@@ -87,11 +73,10 @@ try {
     WHERE 
         a.class_id = ?
         AND a.subject_class_id = ?
-        " . $date_condition . "
     GROUP BY 
         s.student_id, s.full_name, subj.subject_name
     HAVING 
-        COUNT(a.id) > 0
+        COUNT(a.id) = ? AND COUNT(a.id) > 0
     ORDER BY 
         s.full_name ASC
     ";
@@ -100,7 +85,7 @@ try {
     $stmt = $conn->prepare($sql);
 
     // Execute with parameters
-    $stmt->execute($params);
+    $stmt->execute([$total_sessions, $class_id, $subject_class_id, $total_sessions]);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Count total students
@@ -115,95 +100,96 @@ try {
     $pdf->Image('capital.png', $pdf->GetX(), $pdf->GetY(), 30);
     $pdf->Cell(0, 10, 'Absent Report', 0, 1, 'C');
 
-    $pdf->SetTextColor(0, 0, 0); 
+    $pdf->SetTextColor(255, 0, 0); 
     $pdf->SetFont('Arial', 'B', 20);
-    $pdf->Cell(0, 10, 'SUBJECT REPORT', 0, 1, 'C');
+    $pdf->Cell(0, 10, 'NEVER ATTENDED REPORT', 0, 1, 'C');
+    $pdf->SetTextColor(0); 
     
     $pdf->Ln(20);
 
     // Add information
     $pdf->SetFont('Arial', '', 8);
-    $pdf->Cell(30, 6, 'Faculty:', 0, 0);
+    $pdf->Cell(35, 6, 'Faculty:', 0, 0);
     $pdf->Cell(60, 6, $faculty, 0, 1);
-    $pdf->Cell(30, 6, 'Department:', 0, 0);
+    $pdf->Cell(35, 6, 'Department:', 0, 0);
     $pdf->Cell(60, 6, $class_info['department_name'], 0, 1);
-    $pdf->Cell(30, 6, 'Class:', 0, 0);
+    $pdf->Cell(35, 6, 'Class:', 0, 0);
     $pdf->Cell(60, 6, $class_info['class_name'] . ' (' . $class_info['study_mode'] . ')', 0, 1);
-    $pdf->Cell(30, 6, 'Semester:', 0, 0);
+    $pdf->Cell(35, 6, 'Semester:', 0, 0);
     $pdf->Cell(60, 6, $class_info['semester'], 0, 1);
-    $pdf->Cell(30, 6, 'Academic Year:', 0, 0);
+    $pdf->Cell(35, 6, 'Academic Year:', 0, 0);
     $pdf->Cell(60, 6, $class_info['academic_year'], 0, 1);
-    $pdf->Cell(30, 6, 'Subject Name:', 0, 0);
+    $pdf->Cell(35, 6, 'Subject Name:', 0, 0);
     $pdf->Cell(60, 6, $subject_name, 0, 1);
-    
-    // Add date range information if dates are filtered
-    if ($start_date || $end_date) {
-        $pdf->Cell(30, 6, 'Date Range:', 0, 0);
-        if ($start_date && $end_date) {
-            $pdf->Cell(60, 6, $start_date . ' to ' . $end_date, 0, 1);
-        } elseif ($start_date) {
-            $pdf->Cell(60, 6, 'From ' . $start_date, 0, 1);
-        } elseif ($end_date) {
-            $pdf->Cell(60, 6, 'Until ' . $end_date, 0, 1);
-        }
-    }
-    
-    $pdf->Cell(30, 6, 'Total Students:', 0, 0);
+    $pdf->Cell(35, 6, 'Total Sessions:', 0, 0);
+    $pdf->Cell(60, 6, $total_sessions, 0, 1);
+    $pdf->Cell(35, 6, 'Never Attended Count:', 0, 0);
     $pdf->Cell(60, 6, $total_students, 0, 1);
 
-    $pdf->Ln(10);
+    $pdf->Ln(5);
+    
+    // Add warning note BEFORE the table
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->SetTextColor(255, 0, 0);
+    $pdf->Cell(0, 6, 'WARNING: These students have NEVER attended this subject!', 0, 1, 'C');
+    $pdf->SetTextColor(0);
 
-    // Check if there are any results
-    if (!empty($results)) {
-        // Add table headers with red/yellow background
-        $pdf->SetFillColor(255, 200, 100); // Orange color for header
-        $pdf->SetFont('Arial', 'B', 8);
-        $pdf->Cell(10, 6, 'No.', 1, 0, 'C', true);
-        $pdf->Cell(30, 6, 'Student ID', 1, 0, 'C', true);
-        $pdf->Cell(80, 6, 'Student Name', 1, 0, 'C', true);
-        $pdf->Cell(30, 6, 'Absence Count', 1, 0, 'C', true);
-        $pdf->Cell(40, 6, 'Absent Dates', 1, 1, 'C', true);
+    $pdf->Ln(5);
 
-        $pdf->SetFont('Arial', '', 7);
+    // Add table headers with red background for critical alert
+    $pdf->SetFillColor(255, 100, 100); // Red color for critical
+    $pdf->SetFont('Arial', 'B', 8);
+    $pdf->Cell(10, 6, 'No.', 1, 0, 'C', true);
+    $pdf->Cell(25, 6, 'Student ID', 1, 0, 'C', true);
+    $pdf->Cell(70, 6, 'Student Name', 1, 0, 'C', true);
+    $pdf->Cell(25, 6, 'Total Sessions', 1, 0, 'C', true);
+    $pdf->Cell(25, 6, 'Absences', 1, 0, 'C', true);
+    $pdf->Cell(35, 6, 'Status', 1, 1, 'C', true);
 
-        // Add table content
-        $row_number = 1;
-        foreach ($results as $student) {
-            $absence_count = (int)$student['absence_count'];
+    $pdf->SetFont('Arial', '', 7);
 
-            // Set fill color for rows with absence count of 3 or more
-            if ($absence_count >= 3) {
-                $pdf->SetFillColor(255, 200, 200); // Soft red color for high absence
-            } else {
-                $pdf->SetFillColor(255, 255, 220); // Light yellow for normal absence
-            }
-
-            // Print row
-            $pdf->Cell(10, 6, $row_number, 1, 0, 'C', true);
-            $pdf->Cell(30, 6, $student['student_id'], 1, 0, '', true);
-            $pdf->Cell(80, 6, $student['student_name'], 1, 0, '', true);
-            $pdf->Cell(30, 6, $absence_count . ' times', 1, 0, 'C', true);
-            
-            // Handle absent dates - truncate if too long
-            $absent_dates = $student['absent_dates'] ?? 'No dates available';
-            if (strlen($absent_dates) > 25) {
-                $absent_dates = substr($absent_dates, 0, 22) . '...';
-            }
-            $pdf->Cell(40, 6, $absent_dates, 1, 1, '', true);
-            
-            $row_number++;
-        }
-    } else {
-        // No data found - show message with yellow background
+    // Add table content
+    if ($total_sessions == 0) {
+        // No sessions taken yet - show info message
         $pdf->SetFillColor(255, 255, 200); // Light yellow background
         $pdf->SetFont('Arial', 'B', 10);
         $pdf->SetTextColor(200, 100, 0); // Orange text
-        $pdf->Cell(190, 10, 'NO ABSENCES RECORDED', 1, 1, 'C', true);
+        $pdf->Cell(190, 10, 'NO SESSIONS TAKEN YET', 1, 1, 'C', true);
         $pdf->SetTextColor(0); // Reset to black
         
         $pdf->Ln(5);
         $pdf->SetFont('Arial', 'I', 9);
-        $pdf->Cell(0, 6, 'No students have been marked absent for this subject.', 0, 1, 'C');
+        $pdf->Cell(0, 6, 'No attendance sessions have been recorded for this subject yet.', 0, 1, 'C');
+    } elseif (!empty($results)) {
+        $row_number = 1;
+        foreach ($results as $student) {
+            $absence_count = (int)$student['absence_count'];
+            $total_sessions_count = (int)$student['total_sessions'];
+
+            // Red background for all rows (critical)
+            $pdf->SetFillColor(255, 220, 220);
+
+            // Print row
+            $pdf->Cell(10, 6, $row_number, 1, 0, 'C', true);
+            $pdf->Cell(25, 6, $student['student_id'], 1, 0, '', true);
+            $pdf->Cell(70, 6, $student['student_name'], 1, 0, '', true);
+            $pdf->Cell(25, 6, $total_sessions_count, 1, 0, 'C', true);
+            $pdf->Cell(25, 6, $absence_count, 1, 0, 'C', true);
+            $pdf->Cell(35, 6, 'NEVER ATTENDED', 1, 1, 'C', true);
+            
+            $row_number++;
+        }
+    } else {
+        // No students found - show good news message
+        $pdf->SetFillColor(200, 255, 200); // Light green background
+        $pdf->SetFont('Arial', 'B', 10);
+        $pdf->SetTextColor(0, 150, 0); // Green text
+        $pdf->Cell(190, 10, 'EXCELLENT NEWS! No students have missed all sessions.', 1, 1, 'C', true);
+        $pdf->SetTextColor(0); // Reset to black
+        
+        $pdf->Ln(5);
+        $pdf->SetFont('Arial', 'I', 9);
+        $pdf->Cell(0, 6, 'All students have attended at least one session for this subject.', 0, 1, 'C');
     }
 
     $pdf->Ln(10);
@@ -222,7 +208,7 @@ try {
 
     // Output PDF for download
     $subject_name_sanitized = preg_replace('/[^a-zA-Z0-9_]/', '_', $subject_name);
-    $pdf->Output('D', $subject_name_sanitized . '_report.pdf'); 
+    $pdf->Output('D', 'Never_Attended_' . $subject_name_sanitized . '_report.pdf'); 
 
 } catch (PDOException $e) {
     echo "Error: " . $e->getMessage();

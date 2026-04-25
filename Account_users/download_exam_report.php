@@ -2,117 +2,205 @@
 require('../fpdf184/fpdf.php');
 include "../connection/connect.php";
 
-$class_name = $_GET['class_name'];
-$department_name = $_GET['department_name'];
-$study_mode = $_GET['study_mode'];
-$semester = $_GET['semester'];
-$academic = $_GET['academic'];
-$faculty = $_GET['faculty'];
+try {
+    // Include the faculty session management
+    include 'session_faculty.php';
 
-// SQL query to fetch absent students, sorted by student name
-$stmt = $conn->prepare("
-SELECT 
-    absents.*,
-    CONCAT('Absent- ', FORMAT((COUNT(*) / total_days_table.total_days * 10), 1), '%') AS absence_percentage
-FROM 
-    absents
-INNER JOIN (
-    SELECT 
-        student_name,
-        subject_name,
-        COUNT(DISTINCT student_name) AS total_days
-    FROM
-        absents
-    WHERE
-        class_name = :class_name AND department_name = :department_name AND study_mode = :study_mode
-    GROUP BY 
-        student_name, subject_name
-) AS total_days_table 
-ON absents.student_name = total_days_table.student_name AND absents.subject_name = total_days_table.subject_name
-GROUP BY 
-    absents.subject_name, absents.student_name
-HAVING 
-    (COUNT(*) / (SELECT total_days FROM (SELECT student_name, subject_name, COUNT(DISTINCT student_name) AS total_days  FROM absents WHERE class_name = :class_name AND department_name = :department_name AND study_mode = :study_mode GROUP BY student_name, subject_name) AS total_days_table_internal WHERE total_days_table_internal.student_name = absents.student_name AND total_days_table_internal.subject_name = absents.subject_name) * 10) >= 30
-ORDER BY absents.student_name ASC;  // Sort the results by student name
-");
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    $faculty = $sessionInfo['faculty_name'];
+    $faculty_id = $sessionInfo['faculty_id'];
 
-$stmt->bindParam(':class_name', $class_name);
-$stmt->bindParam(':department_name', $department_name);
-$stmt->bindParam(':study_mode', $study_mode);
-$stmt->execute();
+    // Fetch query parameters using new structure
+    $class_id = $_GET['class_id'] ?? '';
+    $department_id = $_GET['department_id'] ?? '';
+    $faculty_id_param = $_GET['faculty_id'] ?? $faculty_id;
 
-$results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Create an array to track unique student IDs for the total count
-$unique_students = array_unique(array_column($results, 'student_id'));
-$total_students = count($unique_students); // Count of unique students
-
-$pdf = new FPDF();
-$pdf->AddPage();
-
-// Header of the PDF
-$pdf->SetFont('Arial', 'B', 12);
-$pdf->Image('capital.png', $pdf->GetX(), $pdf->GetY(), 30);
-$pdf->Cell(0, 10, 'Absent Report', 0, 1, 'C');
-
-$pdf->SetTextColor(255, 0, 0); 
-$pdf->SetFont('Arial', 'B', 20);
-$pdf->Cell(0, 10, 'Students Who Will Miss the Exam', 0, 1, 'C'); // Title indicating students missing exam
-$pdf->SetTextColor(0); 
-
-$pdf->Ln(20);
-
-$pdf->SetFillColor(255, 255, 0);
-$pdf->SetFont('Arial', '', 8);
-$pdf->Cell(30, 6, 'Department:', 0, 0);
-$pdf->Cell(60, 6, $department_name, 0, 1);
-$pdf->Cell(30, 6, 'Class:', 0, 0);
-$pdf->Cell(60, 6, $class_name . ' ('.$study_mode.')', 0, 1);
-$pdf->Cell(30, 6, 'Semester:', 0, 0);
-$pdf->Cell(60, 6, $semester, 0, 1);
-$pdf->Cell(30, 6, 'academic:', 0, 0);
-$pdf->Cell(60, 6, $academic, 0, 1);
-$pdf->Cell(30, 6, 'Total Students:', 0, 0);
-$pdf->Cell(60, 6, $total_students, 0, 1);
-
-$pdf->Ln(10);
-$pdf->SetFillColor(255, 255, 0);
-$pdf->SetFont('Arial', 'B', 8);
-
-// Added Column Number Header
-$pdf->Cell(10, 6, 'No.', 1, 0, 'L', true); // Column for Row Number
-$pdf->Cell(30, 6, 'Student ID', 1, 0, 'L', true);
-$pdf->Cell(60, 6, 'Student Name', 1, 0, 'L', true);
-$pdf->Cell(60, 6, 'Subject Name', 1, 0, 'L', true);
-$pdf->Cell(40, 6, 'Absence Percentage', 1, 1, 'L', true);
-
-$pdf->SetFont('Arial', '', 7);
-
-$row_number = 1; // Initialize row number
-$printed_students = []; // Array to track printed students
-
-foreach ($results as $student) {
-    // Check if student was already printed
-    if (!in_array($student['student_id'], $printed_students)) {
-        // First instance of the student, print row number and details
-        $pdf->Cell(10, 6, $row_number, 1); // Display row number
-        $printed_students[] = $student['student_id']; // Mark student as printed
-        $row_number++; // Increment row number
-    } else {
-        // Subsequent instance of the student, leave row number blank
-        $pdf->Cell(10, 6, '', 1); // Leave column for row number blank
+    // Validate required parameters
+    if (empty($class_id)) {
+        throw new Exception('Missing required parameter: class_id');
     }
 
-    $pdf->Cell(30, 6, $student['student_id'], 1);
-    $pdf->Cell(60, 6, $student['student_name'], 1);
-    $pdf->Cell(60, 6, $student['subject_name'], 1);
-    $pdf->Cell(40, 6, $student['absence_percentage'], 1);
-    $pdf->Ln();
+    // Get class information
+    $class_sql = "SELECT c.class_name, c.study_mode, c.semester, c.academic_year, d.department_name
+                  FROM classes c 
+                  JOIN departments d ON c.department_id = d.id 
+                  WHERE c.id = ?";
+    $class_stmt = $conn->prepare($class_sql);
+    $class_stmt->execute([$class_id]);
+    $class_info = $class_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$class_info) {
+        throw new Exception('Class not found');
+    }
+
+    // Extract class information
+    $class_name = $class_info['class_name'];
+    $department_name = $class_info['department_name'];
+    $study_mode = $class_info['study_mode'];
+    $semester = $class_info['semester'];
+    $academic_year = $class_info['academic_year'];
+    $faculty_name = $faculty; // Use session faculty name
+
+    // Query to fetch students who missed 3 or more times in one subject
+    $stmt = $conn->prepare("
+    SELECT 
+        s.student_id,
+        s.full_name as student_name,
+        subj.subject_name,
+        COUNT(a.id) AS absence_count
+    FROM 
+        absences a
+    INNER JOIN students s ON a.student_id = s.id
+    INNER JOIN subject_class sc ON a.subject_class_id = sc.id
+    INNER JOIN subjects subj ON sc.subject_id = subj.id
+    WHERE
+        a.class_id = ?
+    GROUP BY 
+        s.id, s.student_id, s.full_name, subj.subject_name
+    HAVING 
+        absence_count >= 3
+    ORDER BY 
+        s.full_name ASC, subj.subject_name ASC
+    ");
+
+    // Execute query
+    $stmt->execute([$class_id]);
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Count total unique students and total records
+    $unique_students = [];
+    foreach ($results as $row) {
+        $unique_students[$row['student_id']] = $row['student_name'];
+    }
+    $total_students = count($unique_students);
+    $total_records = count($results);
+
+    // Create PDF document
+    $pdf = new FPDF();
+    $pdf->AddPage();
+
+    // Logo at top left
+    $pdf->Image('capital.png', 10, 10, 25);
+    
+    // Title at top center
+    $pdf->SetFont('Arial', 'B', 16);
+    $pdf->SetY(15);
+    $pdf->Cell(0, 8, 'RE-EXAMINATION REPORT', 0, 1, 'C');
+    
+    $pdf->Ln(15);
+
+    // Add class information
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Faculty:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $faculty_name, 0, 1);
+
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Department:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $department_name, 0, 1);
+
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Class:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $class_name . ' (' . $study_mode . ')', 0, 1);
+
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Semester:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $semester, 0, 1);
+
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Academic Year:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $academic_year, 0, 1);
+
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(50, 7, 'Students Requiring Re-exam:', 0, 0);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(0, 7, $total_students, 0, 1);
+
+    $pdf->Ln(10);
+
+    // Check if there are results and add table headers
+    if ($total_students > 0) {
+        // Add table headers
+        $pdf->SetFillColor(200, 200, 200); // Gray background for header
+        $pdf->SetTextColor(0, 0, 0); // Black text
+        $pdf->SetFont('Arial', 'B', 9);
+        $pdf->Cell(15, 8, 'No.', 1, 0, 'C', true);
+        $pdf->Cell(25, 8, 'Student ID', 1, 0, 'C', true);
+        $pdf->Cell(65, 8, 'Student Name', 1, 0, 'C', true);
+        $pdf->Cell(55, 8, 'Subject Name', 1, 0, 'C', true);
+        $pdf->Cell(25, 8, 'Absences', 1, 1, 'C', true);
+
+        // Reset text color
+        $pdf->SetTextColor(0);
+        
+        // Add table content
+        $pdf->SetFont('Arial', '', 8);
+        $row_number = 1;
+        $previous_student = '';
+
+        foreach ($results as $student) {
+            $current_student = $student['student_name'];
+            
+            // No fill color - white background for all rows
+            $pdf->SetFillColor(255, 255, 255);
+
+            // Show number only for first occurrence of student
+            if ($current_student !== $previous_student) {
+                $pdf->Cell(15, 7, $row_number, 1, 0, 'C', false);
+                $row_number++;
+            } else {
+                $pdf->Cell(15, 7, '', 1, 0, 'C', false);
+            }
+
+            $pdf->Cell(25, 7, $student['student_id'], 1, 0, 'L', false);
+            $pdf->Cell(65, 7, $student['student_name'], 1, 0, 'L', false);
+            $pdf->Cell(55, 7, $student['subject_name'], 1, 0, 'L', false);
+            $pdf->Cell(25, 7, $student['absence_count'] . ' times', 1, 1, 'C', false);
+
+            $previous_student = $current_student;
+        }
+
+        // Add note
+        $pdf->Ln(5);
+        $pdf->SetFont('Arial', 'I', 9);
+        $pdf->SetTextColor(220, 53, 69);
+        $pdf->Cell(0, 6, 'Students listed have missed 3 or more sessions in at least one subject.', 0, 1, 'L');
+        $pdf->SetTextColor(0);
+        
+    } else {
+        // If no data is found, display the message
+        $pdf->SetFont('Arial', 'B', 12);
+        $pdf->SetTextColor(40, 167, 69); // Green color
+        $pdf->Cell(0, 10, 'Excellent! All students have good attendance.', 0, 1, 'C');
+        $pdf->SetTextColor(0);
+        $pdf->SetFont('Arial', '', 10);
+        $pdf->Cell(0, 8, 'No students have missed 3 or more sessions in any subject.', 0, 1, 'C');
+    }
+
+    $pdf->Ln(10);
+    
+    // Add signature section
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->Cell(0, 10, 'Authorized Signature:', 0, 1, 'L');
+    $pdf->Ln(15);
+    $pdf->Cell(50, 10, '____________________', 0, 1, 'L');
+    $pdf->SetFont('Arial', 'I', 8);
+    $pdf->Cell(50, 10, 'Head of Department', 0, 1, 'L');
+    
+    // Add generation date
+    $pdf->Ln(10);
+    $pdf->SetFont('Arial', 'I', 8);
+    $pdf->Cell(0, 10, 'Generated on: ' . date('Y-m-d H:i:s'), 0, 0, 'R');
+
+    // Output PDF for download
+    $pdf->Output('D', $class_name . '_(' . $study_mode . ')_re_exam_report.pdf');
+
+} catch (Exception $e) {
+    echo "Error: " . $e->getMessage();
 }
-
-$pdf->Ln(10);
-$pdf->SetFont('Arial', 'I', 8);
-$pdf->Cell(0, 10, 'Generated on: ' . date('Y-m-d'), 0, 0, 'R');
-
-$pdf->Output('D', 'Exam_Report.pdf');
 ?>
