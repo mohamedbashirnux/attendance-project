@@ -1,69 +1,97 @@
 <?php
-session_start();
+// Include the faculty session management
+include 'session_faculty.php';
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
+// Get faculty information from session
+$sessionInfo = getSessionInfo();
+$faculty = $sessionInfo['faculty_name'];
+$faculty_id = $sessionInfo['faculty_id'];
 
 include "../connection/connect.php";
 
 // Retrieve data from GET parameters
-$departmentName = $_GET['department_name'] ?? '';
-$className = $_GET['class_name'] ?? '';
-$studyMode = $_GET['study_mode'] ?? '';
-$faculty = $_GET['faculty'] ?? '';
-$semester = ''; // Remove GET dependency
-$academic = ''; // Remove GET dependency
+$department_id = $_GET['department_id'] ?? '';
+$class_id = $_GET['class_id'] ?? '';
 
 // Validate required parameters
-if (empty($departmentName) || empty($className) || empty($studyMode) || empty($faculty)) {
-    header("Location: selection_class.php");
+if (empty($department_id) || empty($class_id)) {
+    header("Location: time_table.php");
     exit();
 }
 
+// Get department and class information
+$departmentName = '';
+$className = '';
+$studyMode = '';
+$semester = '';
+$academic = '';
+
 try {
-    // First, get semester and academic year from students table for this class
-    $classInfoSql = "SELECT semester, academic FROM students 
-                     WHERE department_name = :department_name 
-                       AND class_name = :class_name 
-                       AND study_mode = :study_mode 
-                       AND faculty_name = :faculty_name 
-                     LIMIT 1";
-    
-    $classInfoStmt = $conn->prepare($classInfoSql);
-    $classInfoStmt->bindParam(':department_name', $departmentName);
-    $classInfoStmt->bindParam(':class_name', $className);
-    $classInfoStmt->bindParam(':study_mode', $studyMode);
-    $classInfoStmt->bindParam(':faculty_name', $faculty);
-    $classInfoStmt->execute();
-    
-    $classInfo = $classInfoStmt->fetch(PDO::FETCH_ASSOC);
-    if ($classInfo) {
-        $semester = $classInfo['semester'];
-        $academic = $classInfo['academic'];
+    // Get department name
+    $dept_sql = "SELECT department_name FROM departments WHERE id = ? AND faculty_id = ?";
+    $dept_stmt = $conn->prepare($dept_sql);
+    $dept_stmt->execute([$department_id, $faculty_id]);
+    $dept_result = $dept_stmt->fetch(PDO::FETCH_ASSOC);
+    if ($dept_result) {
+        $departmentName = $dept_result['department_name'];
     }
 
-    // Prepare SQL statement to get timetable entries
-    $sql = "SELECT id, department_name, class_name, study_mode, semester, academic_year, 
-                   faculty_name, teacher_name, subject_name, day_of_week, time_start, time_end, location_hall
-            FROM timetable 
-            WHERE department_name = :department_name 
-              AND class_name = :class_name 
-              AND study_mode = :study_mode 
-              AND faculty_name = :faculty_name";
+    // Get class information
+    $class_sql = "SELECT class_name, study_mode, semester, academic_year FROM classes WHERE id = ? AND faculty_id = ?";
+    $class_stmt = $conn->prepare($class_sql);
+    $class_stmt->execute([$class_id, $faculty_id]);
+    $class_info = $class_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$class_info) {
+        header("Location: time_table.php");
+        exit();
+    }
+    
+    $className = $class_info['class_name'];
+    $studyMode = $class_info['study_mode'];
+    $semester = $class_info['semester'];
+    $academic = $class_info['academic_year'];
 
-    // Add ORDER BY clause to sort the result by day_of_week and time_start
-    $sql .= " ORDER BY FIELD(day_of_week, 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), time_start ASC";
+    // Check if timetable table has the new structure (class_id and allocation_id columns)
+    $check_columns_sql = "SHOW COLUMNS FROM timetable LIKE 'class_id'";
+    $check_stmt = $conn->query($check_columns_sql);
+    $has_new_structure = ($check_stmt->rowCount() > 0);
 
-    $stmt = $conn->prepare($sql);
-
-    // Bind parameters
-    $stmt->bindParam(':department_name', $departmentName);
-    $stmt->bindParam(':class_name', $className);
-    $stmt->bindParam(':study_mode', $studyMode);
-    $stmt->bindParam(':faculty_name', $faculty);
+    if ($has_new_structure) {
+        // Use new structure with JOINs
+        $sql = "SELECT tt.id, d.department_name, c.class_name, c.study_mode, c.semester, c.academic_year,
+                       f.faculty_name, t.full_name as teacher_name, s.subject_name, 
+                       tt.day_of_week, tt.time_start, tt.time_end, tt.location_hall
+                FROM timetable tt
+                JOIN classes c ON tt.class_id = c.id
+                JOIN departments d ON c.department_id = d.id
+                JOIN faculty f ON c.faculty_id = f.id
+                JOIN teacher_subject_allocation tsa ON tt.allocation_id = tsa.id
+                JOIN teachers t ON tsa.teacher_id = t.id
+                JOIN subjects s ON tsa.subject_id = s.id
+                WHERE tt.class_id = :class_id AND c.faculty_id = :faculty_id
+                ORDER BY FIELD(tt.day_of_week, 'Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'), tt.time_start ASC";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bindParam(':class_id', $class_id, PDO::PARAM_INT);
+        $stmt->bindParam(':faculty_id', $faculty_id, PDO::PARAM_INT);
+    } else {
+        // Use old structure with text fields (fallback for backward compatibility)
+        $sql = "SELECT id, department_name, class_name, study_mode, semester, academic_year, 
+                       faculty_name, teacher_name, subject_name, day_of_week, time_start, time_end, location_hall
+                FROM timetable 
+                WHERE department_name = :department_name 
+                  AND class_name = :class_name 
+                  AND study_mode = :study_mode 
+                  AND faculty_name = :faculty_name
+                ORDER BY FIELD(day_of_week, 'Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'), time_start ASC";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bindParam(':department_name', $departmentName);
+        $stmt->bindParam(':class_name', $className);
+        $stmt->bindParam(':study_mode', $studyMode);
+        $stmt->bindParam(':faculty_name', $faculty);
+    }
 
     // Execute the statement
     $stmt->execute();
@@ -71,11 +99,9 @@ try {
     // Fetch results
     $timetables = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Close the connection (optional, since PDO closes automatically when script ends)
-    $stmt = null;
-    $conn = null;
 } catch (Exception $e) {
     echo "Error: " . $e->getMessage();
+    exit();
 }
 ?>
 
@@ -158,7 +184,7 @@ try {
                 <div class="content-wrapper">
                     <div class="container-xxl flex-grow-1 container-p-y">
                         <div class="d-flex align-items-center mb-4">
-                            <a href="selection_student.php" class="btn btn-secondary me-3"><i class='bx bx-arrow-back'></i></a>
+                            <a href="time_table.php" class="btn btn-secondary me-3"><i class='bx bx-arrow-back'></i></a>
                             <h4 class="fw-bold m-0">Timetable Management</h4>
                         </div>
                         
@@ -252,7 +278,7 @@ try {
             </div>
             <form id="addTimetableForm" action="../Database_users/assing_time_table/add_time_table.php" method="POST">
                 <div class="modal-body">
-                    <!-- First Row: Subject Only -->
+                    <!-- Subject Selection -->
                     <div class="row mb-3">
                         <div class="col-md-12">
                             <label for="subjectName" class="form-label">Subject Name</label>
@@ -263,7 +289,7 @@ try {
                         </div>
                     </div>
 
-                    <!-- Second Row: Teacher (Auto-filled) and Day -->
+                    <!-- Teacher (Auto-filled) and Day -->
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="teacherName" class="form-label">Teacher Name</label>
@@ -280,12 +306,11 @@ try {
                                 <option value="Wednesday">Wednesday</option>
                                 <option value="Thursday">Thursday</option>
                                 <option value="Friday">Friday</option>
-                               
                             </select>
                         </div>
                     </div>
 
-                    <!-- Third Row: Time Start and Time End -->
+                    <!-- Time Start and Time End -->
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="timeStart" class="form-label">Time Start</label>
@@ -297,50 +322,23 @@ try {
                         </div>
                     </div>
 
-                    <!-- Row for Department Name and Class Name -->
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="departmentName" class="form-label">Department Name</label>
-                            <input type="text" class="form-control" id="departmentName" name="departmentName" value="<?php echo htmlspecialchars($departmentName); ?>" readonly>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="className" class="form-label">Class Name</label>
-                            <input type="text" class="form-control" id="className" name="className" value="<?php echo htmlspecialchars($className); ?>" readonly>
-                        </div>
-                    </div>
-
-                    <!-- Row for Study Mode -->
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="studyMode" class="form-label">Study Mode</label>
-                            <input type="text" class="form-control" id="studyMode" name="studyMode" value="<?php echo htmlspecialchars($studyMode); ?>" readonly>
-                        </div>
-                    </div>
-                    
-                    <!-- Row for Semester and Academic -->
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="semester" class="form-label">Semester</label>
-                            <input type="text" class="form-control" id="semester" name="semester" 
-                            value="<?php echo htmlspecialchars($semester); ?>" readonly>
-                        </div>
-                        <div class="col-md-6">
-                            <label for="academic" class="form-label">Academic</label>
-                            <input type="text" class="form-control" id="academic" name="academic" 
-                            value="<?php echo htmlspecialchars($academic); ?>" readonly>
-                        </div>
-                    </div>
-
-                    <!-- Row for Location Hall -->
+                    <!-- Location Hall -->
                     <div class="row mb-3">
                         <div class="col-md-12">
                             <label for="locationHall" class="form-label">Location/Hall</label>
-                            <input type="text" class="form-control" id="locationHall" name="locationHall" required>
+                            <input type="text" class="form-control" id="locationHall" name="locationHall" placeholder="e.g., Room 101, Lab A" required>
                         </div>
                     </div>
 
-                    <!-- Hidden fields for Faculty -->
+                    <!-- Hidden fields -->
                     <input type="hidden" name="faculty" value="<?php echo htmlspecialchars($faculty); ?>">
+                    <input type="hidden" name="class_id" value="<?php echo htmlspecialchars($class_id); ?>">
+                    <input type="hidden" name="allocation_id" id="allocationId">
+                    <input type="hidden" name="departmentName" value="<?php echo htmlspecialchars($departmentName); ?>">
+                    <input type="hidden" name="className" value="<?php echo htmlspecialchars($className); ?>">
+                    <input type="hidden" name="studyMode" value="<?php echo htmlspecialchars($studyMode); ?>">
+                    <input type="hidden" name="semester" value="<?php echo htmlspecialchars($semester); ?>">
+                    <input type="hidden" name="academic" value="<?php echo htmlspecialchars($academic); ?>">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -371,16 +369,24 @@ $(document).ready(function() {
     // Handle form submission for adding timetable entries
     $('#addTimetableForm').on('submit', function(event) {
         event.preventDefault(); // Prevent the default form submission
+        
+        // Validate that allocation_id is set
+        var allocationId = $('#allocationId').val();
+        if (!allocationId) {
+            alert('Please select a subject first.');
+            return;
+        }
+        
         $.ajax({
             url: '../Database_users/assing_time_table/add_time_table.php', // URL to the PHP script
             type: 'POST',
             data: $(this).serialize(), // Serialize form data
             dataType: 'json',
             beforeSend: function() {
-                $('button[type="submit"]').prop('disabled', true); // Disable the submit button to prevent multiple submissions
+                $('button[type="submit"]').prop('disabled', true).text('Adding...'); // Disable the submit button to prevent multiple submissions
             },
             success: function(response) {
-                $('button[type="submit"]').prop('disabled', false); // Re-enable the submit button
+                $('button[type="submit"]').prop('disabled', false).text('Add Timetable Entry'); // Re-enable the submit button
                 if (response.success) {
                     $('#addTimetableForm')[0].reset(); // Reset the form
                     $('#addTimetableModal').modal('hide'); // Hide the modal
@@ -391,39 +397,42 @@ $(document).ready(function() {
                         window.location.reload(); // Reload the page after a short delay
                     }, 1000); // Delay for toast to appear before refreshing
                 } else {
-                    // Handle error messages
+                    // Handle error messages - show the actual error from server
                     alert(response.message || 'An error occurred while adding the timetable entry.');
                 }
             },
             error: function(xhr, status, error) {
+                $('button[type="submit"]').prop('disabled', false).text('Add Timetable Entry');
                 console.error("AJAX Error: " + status + ' - ' + error); // Log error to console
-                alert("An error occurred while adding the timetable entry. Please try again.");
+                console.error("Response: " + xhr.responseText); // Log response text
+                
+                // Try to parse error response
+                try {
+                    var errorResponse = JSON.parse(xhr.responseText);
+                    alert(errorResponse.message || "An error occurred while adding the timetable entry. Please try again.");
+                } catch(e) {
+                    alert("An error occurred while adding the timetable entry. Please check the console for details.");
+                }
             }
         });
     });
 
     // Add modal show event handler to populate subjects
     $('#addTimetableModal').on('show.bs.modal', function() {
-        // Get the current class information from the page
-        var departmentName = '<?php echo htmlspecialchars($departmentName); ?>';
-        var className = '<?php echo htmlspecialchars($className); ?>';
-        var studyMode = '<?php echo htmlspecialchars($studyMode); ?>';
-        var faculty = '<?php echo htmlspecialchars($faculty); ?>';
+        // Get the current class ID
+        var classId = '<?php echo $class_id; ?>';
         
         // Load subjects for this specific class
-        loadSubjects(departmentName, className, studyMode, faculty);
+        loadSubjects(classId);
     });
 
-    // Load subjects function for the selected class from allocate_teacher_subject table
-    function loadSubjects(departmentName, className, studyMode, faculty) {
+    // Load subjects function for the selected class from teacher_subject_allocation table
+    function loadSubjects(classId) {
         $.ajax({
-            url: '../Database_users/allocate_update_teaher/fetch_subjects_for_class.php',
+            url: '../Database_users/assing_time_table/fetch_subjects_for_class.php',
             type: 'GET',
             data: {
-                department_name: departmentName,
-                class_name: className,
-                study_mode: studyMode,
-                faculty_name: faculty
+                class_id: classId
             },
             success: function(data) {
                 var subjectOptions = '<option value="">Select Subject</option>' + data;
@@ -438,55 +447,23 @@ $(document).ready(function() {
     }
 
     // Auto-fill teacher and time fields when subject is selected
-    function autoFillTeacherAndTime(subjectName) {
-        var departmentName = '<?php echo htmlspecialchars($departmentName); ?>';
-        var className = '<?php echo htmlspecialchars($className); ?>';
-        var studyMode = '<?php echo htmlspecialchars($studyMode); ?>';
-        var faculty = '<?php echo htmlspecialchars($faculty); ?>';
-        
-        if (!subjectName) return;
-        
-        $.ajax({
-            url: '../Database_users/allocate_update_teaher/fetch_subject_allocation.php',
-            type: 'GET',
-            data: {
-                subject_name: subjectName,
-                department_name: departmentName,
-                class_name: className,
-                study_mode: studyMode,
-                faculty_name: faculty
-            },
-            success: function(data) {
-                try {
-                    var allocation = JSON.parse(data);
-                    if (allocation.success && allocation.data) {
-                        var teacherName = allocation.data.teacher_name;
-                        var startTime = allocation.data.start_time;
-                        var endTime = allocation.data.end_time;
-                        
-                        $('#teacherName').val(teacherName);
-                        $('#timeStart').val(startTime);
-                        $('#timeEnd').val(endTime);
-                    }
-                } catch (e) {
-                    console.error('Error parsing allocation data:', e);
-                }
-            },
-            error: function(jqXHR, textStatus, errorThrown) {
-                console.error('Error fetching subject allocation:', textStatus, errorThrown);
-            }
-        });
-    }
-
-    // Auto-fill time fields when subject changes in Add Modal
     $('#subjectName').change(function() {
-        var subjectName = $(this).val();
-        if (subjectName) {
-            autoFillTeacherAndTime(subjectName);
+        var selectedOption = $(this).find('option:selected');
+        var teacherName = selectedOption.data('teacher');
+        var startTime = selectedOption.data('start-time');
+        var endTime = selectedOption.data('end-time');
+        var allocationId = selectedOption.data('allocation-id');
+        
+        if (teacherName && startTime && endTime) {
+            $('#teacherName').val(teacherName);
+            $('#timeStart').val(startTime);
+            $('#timeEnd').val(endTime);
+            $('#allocationId').val(allocationId);
         } else {
             $('#teacherName').val('');
             $('#timeStart').val('');
             $('#timeEnd').val('');
+            $('#allocationId').val('');
         }
     });
 
