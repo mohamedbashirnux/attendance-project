@@ -1,86 +1,104 @@
 <?php
-session_start();
+// Set timezone to Somalia (East Africa Time)
+date_default_timezone_set('Africa/Mogadishu');
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
 
-$faculty = $_SESSION['faculty'];
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
+// Clear any unexpected output from includes
+ob_clean();
+
+// Set content type to JSON
+header('Content-Type: application/json');
+
 try {
-    // Retrieve and sanitize input data
-    $original_student_id = filter_var($_POST['originalStudentId'], FILTER_SANITIZE_NUMBER_INT);
-    $new_student_id = filter_var($_POST['editStudentId'], FILTER_SANITIZE_NUMBER_INT);
-    $student_name = filter_var($_POST['editStudentName'], FILTER_SANITIZE_STRING);
-    $department_name = filter_var($_POST['editDepartmentName'], FILTER_SANITIZE_STRING);
-    $class_name = filter_var($_POST['editClassName'], FILTER_SANITIZE_STRING);
-    $study_mode = filter_var($_POST['editStudyMode'], FILTER_SANITIZE_STRING);
-    $tell = filter_var($_POST['editStudentnumber'], FILTER_SANITIZE_STRING);
-    $new_password = $_POST['editPassword'];
-
-    // Begin transaction to ensure atomicity
-    $conn->beginTransaction();
-
-    // Update the students table with non-password fields
-    $stmt = $conn->prepare("
-        UPDATE students 
-        SET student_id = :new_student_id, student_name = :student_name, department_name = :department_name, 
-        class_name = :class_name, study_mode = :study_mode, faculty_name = :faculty, tell = :tell
-        WHERE student_id = :original_student_id
-    ");
-
-    $stmt->bindParam(':new_student_id', $new_student_id, PDO::PARAM_INT);
-    $stmt->bindParam(':student_name', $student_name, PDO::PARAM_STR);
-    $stmt->bindParam(':department_name', $department_name, PDO::PARAM_STR);
-    $stmt->bindParam(':class_name', $class_name, PDO::PARAM_STR);
-    $stmt->bindParam(':study_mode', $study_mode, PDO::PARAM_STR);
-    $stmt->bindParam(':faculty', $faculty, PDO::PARAM_STR);
-    $stmt->bindParam(':tell', $tell, PDO::PARAM_STR);
-    $stmt->bindParam(':original_student_id', $original_student_id, PDO::PARAM_INT);
-
-    if (!$stmt->execute()) {
-        throw new Exception("Update failed for students.");
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
 
-    // If a new password is provided, update it (WITHOUT HASHING for existing students)
-    if (!empty($new_password)) {
-        // Fetch the current password of the student
-        $stmt2 = $conn->prepare("SELECT password FROM students WHERE student_id = :new_student_id");
-        $stmt2->bindParam(':new_student_id', $new_student_id, PDO::PARAM_INT);
-        $stmt2->execute();
-        $current_password = $stmt2->fetchColumn();
+    $faculty_id = $sessionInfo['faculty_id'];
 
-        // If there's no current password, just save the new password as plain text
-        if (empty($current_password)) {
-            $password_to_save = $new_password; // Store new password as plain text
-        } else {
-            // If there's an existing password, just update the existing password (do not hash)
-            $password_to_save = $new_password; // Keep the new password as plain text for existing users too
-        }
-
-        // Update the password in the database
-        $stmt3 = $conn->prepare("
-            UPDATE students 
-            SET password = :password_to_save
-            WHERE student_id = :new_student_id
-        ");
-
-        $stmt3->bindParam(':password_to_save', $password_to_save, PDO::PARAM_STR);
-        $stmt3->bindParam(':new_student_id', $new_student_id, PDO::PARAM_INT);
-
-        if (!$stmt3->execute()) {
-            throw new Exception("Password update failed.");
-        }
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
     }
 
-    // Commit transaction
-    $conn->commit();
-    echo json_encode(['status' => 'success']);
+    $id = trim($_POST['id'] ?? '');
+    $student_id = trim($_POST['student_id'] ?? '');
+    $full_name = trim($_POST['full_name'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+    $status = trim($_POST['status'] ?? 'approved');
+
+    // Validate required fields
+    if (empty($id) || empty($student_id) || empty($full_name) || empty($phone)) {
+        throw new Exception("All required fields must be filled");
+    }
+
+    // Verify that the student exists and belongs to a class in this faculty
+    $verify_sql = "SELECT s.id, s.class_id FROM students s 
+                   JOIN classes c ON s.class_id = c.id 
+                   WHERE s.id = ? AND c.faculty_id = ?";
+    $verify_stmt = $conn->prepare($verify_sql);
+    $verify_stmt->execute([$id, $faculty_id]);
+    $student = $verify_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$student) {
+        throw new Exception("Access denied - student not found or doesn't belong to your faculty");
+    }
+
+    // Check if student_id already exists (excluding current student)
+    $check_student_id_sql = "SELECT id FROM students WHERE student_id = ? AND id != ?";
+    $check_student_id_stmt = $conn->prepare($check_student_id_sql);
+    $check_student_id_stmt->execute([$student_id, $id]);
+    
+    if ($check_student_id_stmt->fetch()) {
+        throw new Exception("Student ID already exists");
+    }
+
+    // Prepare update query
+    if (!empty($password)) {
+        // Update with new password
+        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+        $update_sql = "UPDATE students SET student_id = ?, full_name = ?, phone = ?, password = ?, status = ? WHERE id = ?";
+        $update_stmt = $conn->prepare($update_sql);
+        $params = [$student_id, $full_name, $phone, $hashed_password, $status, $id];
+    } else {
+        // Update without changing password
+        $update_sql = "UPDATE students SET student_id = ?, full_name = ?, phone = ?, status = ? WHERE id = ?";
+        $update_stmt = $conn->prepare($update_sql);
+        $params = [$student_id, $full_name, $phone, $status, $id];
+    }
+
+    if (!$update_stmt->execute($params)) {
+        $errorInfo = $update_stmt->errorInfo();
+        throw new Exception("Database error: " . $errorInfo[2]);
+    }
+
+    ob_clean();
+    echo json_encode([
+        "success" => true, 
+        "message" => "Student updated successfully"
+    ]);
+
+} catch (Exception $e) {
+    ob_clean();
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 } catch (PDOException $e) {
-    $conn->rollBack();
-    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    ob_clean();
+    echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

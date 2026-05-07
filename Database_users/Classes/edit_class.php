@@ -1,160 +1,122 @@
 <?php
-session_start(); // Ensure session is started to use session variables
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
 
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Retrieve form data
-    $originalDepartmentName = $_POST['originalDepartmentName'];
-    $originalClassName = $_POST['originalClassName'];
-    $originalStudyMode = $_POST['originalStudyMode'];
+// Clear any unexpected output from includes
+ob_clean();
 
-    $departmentName = $_POST['departmentName'];
-    $className = $_POST['className'];
-    $studyMode = $_POST['studyMode'];
-    $semester = $_POST['semester'];
-    $academic = $_POST['academicYear'];
+header('Content-Type: application/json');
 
-    // Check if any required field is empty
-    if (empty($originalDepartmentName) || empty($originalClassName) || empty($originalStudyMode) || 
-        empty($departmentName) || empty($className) || empty($studyMode) || empty($semester) || empty($academic)) {
-        echo json_encode(['status' => 'error', 'message' => 'Please fill in all fields']);
-        exit;
+try {
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
 
-    try {
-        // Check if the edited class already exists
-        $stmtCheckExistence = $conn->prepare("SELECT * FROM classes WHERE department_name = :departmentName AND class_name = :className AND study_mode = :studyMode");
-        $stmtCheckExistence->bindParam(':departmentName', $departmentName);
-        $stmtCheckExistence->bindParam(':className', $className);
-        $stmtCheckExistence->bindParam(':studyMode', $studyMode);
-        $stmtCheckExistence->execute();
+    $faculty_id = $sessionInfo['faculty_id'];
 
-        if ($stmtCheckExistence->rowCount() > 0 && (
-            $originalDepartmentName !== $departmentName || 
-            $originalClassName !== $className || 
-            $originalStudyMode !== $studyMode)) {
-            echo json_encode(['status' => 'warning', 'message' => 'Class already exists']);
-            exit;
-        }
-
-        $conn->beginTransaction(); // Start a transaction
-
-        // Update class in `classes` table
-        $updateClassQuery = "UPDATE classes SET department_name = :departmentName, class_name = :className, study_mode = :studyMode, semester = :semester, academic = :academic
-                            WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                            AND study_mode = :originalStudyMode";
-        $stmtUpdateClass = $conn->prepare($updateClassQuery);
-        $stmtUpdateClass->bindParam(':departmentName', $departmentName);
-        $stmtUpdateClass->bindParam(':className', $className);
-        $stmtUpdateClass->bindParam(':studyMode', $studyMode);
-        $stmtUpdateClass->bindParam(':semester', $semester);
-        $stmtUpdateClass->bindParam(':academic', $academic);
-        $stmtUpdateClass->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateClass->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateClass->bindParam(':originalStudyMode', $originalStudyMode);
-
-        if (!$stmtUpdateClass->execute()) {
-            throw new Exception("Failed to update class: " . implode(", ", $stmtUpdateClass->errorInfo()));
-        }
-
-        // Update `students` table
-        $updateStudentsQuery = "UPDATE students SET department_name = :departmentName, class_name = :className, study_mode = :studyMode, semester = :semester, academic = :academic
-                                WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                                AND study_mode = :originalStudyMode AND faculty_name = :facultyName";
-        $stmtUpdateStudents = $conn->prepare($updateStudentsQuery);
-        $stmtUpdateStudents->bindParam(':departmentName', $departmentName);
-        $stmtUpdateStudents->bindParam(':className', $className);
-        $stmtUpdateStudents->bindParam(':studyMode', $studyMode);
-        $stmtUpdateStudents->bindParam(':semester', $semester);
-        $stmtUpdateStudents->bindParam(':academic', $academic);
-        $stmtUpdateStudents->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateStudents->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateStudents->bindParam(':originalStudyMode', $originalStudyMode);
-        $stmtUpdateStudents->bindParam(':facultyName', $_SESSION['faculty']);
-
-        if (!$stmtUpdateStudents->execute()) {
-            throw new Exception("Failed to update students: " . implode(", ", $stmtUpdateStudents->errorInfo()));
-        }
-
-        // Update `allocate_teacher_subject` table
-        $updateAllocateQuery = "UPDATE allocate_teacher_subject SET department_name = :departmentName, class_name = :className, study_mode = :studyMode 
-                                WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                                AND study_mode = :originalStudyMode AND faculty_name = :facultyName";
-        $stmtUpdateAllocate = $conn->prepare($updateAllocateQuery);
-        $stmtUpdateAllocate->bindParam(':departmentName', $departmentName);
-        $stmtUpdateAllocate->bindParam(':className', $className);
-        $stmtUpdateAllocate->bindParam(':studyMode', $studyMode);
-        $stmtUpdateAllocate->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateAllocate->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateAllocate->bindParam(':originalStudyMode', $originalStudyMode);
-        $stmtUpdateAllocate->bindParam(':facultyName', $_SESSION['faculty']);
-
-        if (!$stmtUpdateAllocate->execute()) {
-            throw new Exception("Failed to update allocate_teacher_subject: " . implode(", ", $stmtUpdateAllocate->errorInfo()));
-        }
-                // Update `submit_session` table
-        $updateSubmitSessionQuery = "UPDATE submit_session SET department_name = :departmentName, class_name = :className, study_mode = :studyMode, semester = :semester, academic = :academic
-                                     WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                                     AND study_mode = :originalStudyMode";
-        $stmtUpdateSubmitSession = $conn->prepare($updateSubmitSessionQuery);
-        $stmtUpdateSubmitSession->bindParam(':departmentName', $departmentName);
-        $stmtUpdateSubmitSession->bindParam(':className', $className);
-        $stmtUpdateSubmitSession->bindParam(':studyMode', $studyMode);
-        $stmtUpdateSubmitSession->bindParam(':semester', $semester);
-        $stmtUpdateSubmitSession->bindParam(':academic', $academic);
-        $stmtUpdateSubmitSession->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateSubmitSession->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateSubmitSession->bindParam(':originalStudyMode', $originalStudyMode);
-
-        if (!$stmtUpdateSubmitSession->execute()) {
-            throw new Exception("Failed to update submit_session: " . implode(", ", $stmtUpdateSubmitSession->errorInfo()));
-        }
-
-        // Update `absents` table (with same columns as students)
-        $updateAbsentsQuery = "UPDATE absents SET department_name = :departmentName, class_name = :className, study_mode = :studyMode, semester = :semester, academic = :academic
-                               WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                               AND study_mode = :originalStudyMode";
-        $stmtUpdateAbsents = $conn->prepare($updateAbsentsQuery);
-        $stmtUpdateAbsents->bindParam(':departmentName', $departmentName);
-        $stmtUpdateAbsents->bindParam(':className', $className);
-        $stmtUpdateAbsents->bindParam(':studyMode', $studyMode);
-        $stmtUpdateAbsents->bindParam(':semester', $semester);
-        $stmtUpdateAbsents->bindParam(':academic', $academic);
-        $stmtUpdateAbsents->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateAbsents->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateAbsents->bindParam(':originalStudyMode', $originalStudyMode);
-
-        if (!$stmtUpdateAbsents->execute()) {
-            throw new Exception("Failed to update absents: " . implode(", ", $stmtUpdateAbsents->errorInfo()));
-        }
-
-        // Update `subject_class` table
-        $updateSubjectClassQuery = "UPDATE subject_class SET department_name = :departmentName, class_name = :className, study_mode = :studyMode 
-                                    WHERE department_name = :originalDepartmentName AND class_name = :originalClassName 
-                                    AND study_mode = :originalStudyMode AND faculty_name = :facultyName";
-        $stmtUpdateSubjectClass = $conn->prepare($updateSubjectClassQuery);
-        $stmtUpdateSubjectClass->bindParam(':departmentName', $departmentName);
-        $stmtUpdateSubjectClass->bindParam(':className', $className);
-        $stmtUpdateSubjectClass->bindParam(':studyMode', $studyMode);
-        $stmtUpdateSubjectClass->bindParam(':originalDepartmentName', $originalDepartmentName);
-        $stmtUpdateSubjectClass->bindParam(':originalClassName', $originalClassName);
-        $stmtUpdateSubjectClass->bindParam(':originalStudyMode', $originalStudyMode);
-        $stmtUpdateSubjectClass->bindParam(':facultyName', $_SESSION['faculty']);
-
-        if (!$stmtUpdateSubjectClass->execute()) {
-            throw new Exception("Failed to update subject_class: " . implode(", ", $stmtUpdateSubjectClass->errorInfo()));
-        }
-
-        $conn->commit(); // Commit transaction
-        echo json_encode(['status' => 'success', 'message' => 'All records updated successfully']);
-    } catch (Exception $e) {
-        $conn->rollBack(); // Rollback transaction if any error occurs
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception("Invalid request method");
     }
 
-    $conn = null;
-} else {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid request method']);
+    $class_id = trim($_POST['classId'] ?? '');
+    $department_id = trim($_POST['departmentName'] ?? '');
+    $class_name = trim($_POST['className'] ?? '');
+    $study_mode = trim($_POST['studyMode'] ?? '');
+    $semester = trim($_POST['semester'] ?? '');
+    $academic_year = trim($_POST['academicYear'] ?? '');
+
+    // Validate input
+    if (empty($class_id) || empty($department_id) || empty($class_name) || empty($study_mode) || empty($semester) || empty($academic_year)) {
+        throw new Exception("All fields are required");
+    }
+    
+    // Get valid ENUM values from database
+    $study_mode_query = "SHOW COLUMNS FROM classes LIKE 'study_mode'";
+    $study_mode_result = $conn->query($study_mode_query);
+    $study_mode_row = $study_mode_result->fetch(PDO::FETCH_ASSOC);
+    preg_match_all("/'([^']+)'/", $study_mode_row['Type'], $study_mode_matches);
+    $valid_study_modes = $study_mode_matches[1];
+
+    $semester_query = "SHOW COLUMNS FROM classes LIKE 'semester'";
+    $semester_result = $conn->query($semester_query);
+    $semester_row = $semester_result->fetch(PDO::FETCH_ASSOC);
+    preg_match_all("/'([^']+)'/", $semester_row['Type'], $semester_matches);
+    $valid_semesters = $semester_matches[1];
+    
+    // Validate ENUM values
+    if (!in_array($study_mode, $valid_study_modes)) {
+        throw new Exception("Invalid study mode selected");
+    }
+    
+    if (!in_array($semester, $valid_semesters)) {
+        throw new Exception("Invalid semester selected");
+    }
+    
+    // Validate academic year format (YYYY/YYYY)
+    if (!preg_match('/^\d{4}\/\d{4}$/', $academic_year)) {
+        throw new Exception("Invalid academic year format");
+    }
+
+    // Begin transaction
+    $conn->beginTransaction();
+
+    // Verify the class belongs to this faculty
+    $verify_sql = "SELECT id FROM classes WHERE id = ? AND faculty_id = ?";
+    $verify_stmt = $conn->prepare($verify_sql);
+    $verify_stmt->execute([$class_id, $faculty_id]);
+    
+    if ($verify_stmt->rowCount() === 0) {
+        throw new Exception("Class not found or access denied");
+    }
+
+    // Verify department belongs to this faculty
+    $dept_verify_sql = "SELECT id FROM departments WHERE id = ? AND faculty_id = ?";
+    $dept_verify_stmt = $conn->prepare($dept_verify_sql);
+    $dept_verify_stmt->execute([$department_id, $faculty_id]);
+    
+    if ($dept_verify_stmt->rowCount() === 0) {
+        throw new Exception("Invalid department selected");
+    }
+
+    // Check if updated class already exists (excluding current class)
+    $check_sql = "SELECT id FROM classes WHERE faculty_id = ? AND department_id = ? AND class_name = ? AND study_mode = ? AND semester = ? AND academic_year = ? AND id != ?";
+    $check_stmt = $conn->prepare($check_sql);
+    $check_stmt->execute([$faculty_id, $department_id, $class_name, $study_mode, $semester, $academic_year, $class_id]);
+    
+    if ($check_stmt->rowCount() > 0) {
+        throw new Exception("Class already exists");
+    }
+
+    // Update class
+    $sql = "UPDATE classes SET department_id = ?, class_name = ?, study_mode = ?, semester = ?, academic_year = ? WHERE id = ? AND faculty_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->execute([$department_id, $class_name, $study_mode, $semester, $academic_year, $class_id, $faculty_id]);
+
+    // Commit transaction
+    $conn->commit();
+    
+    ob_clean();
+    echo json_encode(['status' => 'success', 'message' => 'Class updated successfully']);
+
+} catch (Exception $e) {
+    if ($conn->inTransaction()) {
+        $conn->rollBack();
+    }
+    ob_clean();
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

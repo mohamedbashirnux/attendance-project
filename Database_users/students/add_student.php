@@ -1,83 +1,103 @@
 <?php
-session_start();
+// Set timezone to Somalia (East Africa Time)
+date_default_timezone_set('Africa/Mogadishu');
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
+// Suppress PHP warnings to ensure clean JSON output
+error_reporting(0);
+ini_set('display_errors', 0);
 
-// Database connection details
+// Start output buffering to catch any unexpected output
+ob_start();
+
+// Include the faculty session management
+include "../../Account_users/session_faculty.php";
+
+// Include database connection
 include "../../connection/connect.php";
 
+// Clear any unexpected output from includes
+ob_clean();
+
+// Set content type to JSON
+header('Content-Type: application/json');
+
 try {
-    if ($_SERVER["REQUEST_METHOD"] == "POST") {
-        // Validate and sanitize input data
-        $studentId = filter_var($_POST['studentId'], FILTER_SANITIZE_NUMBER_INT);
-        $studentName = filter_var($_POST['studentName'], FILTER_SANITIZE_STRING);
-        $departmentName = filter_var($_POST['departmentName'], FILTER_SANITIZE_STRING);
-        $className = filter_var($_POST['className'], FILTER_SANITIZE_STRING);
-        $studyMode = filter_var($_POST['studyMode'], FILTER_SANITIZE_STRING);
-        $faculty = $_POST['faculty'];
-        $c_id = $_POST['class_id'];
-        $studentnumber = $_POST['studentnumber'];
-        $password = filter_var($_POST['password'], FILTER_SANITIZE_STRING);
-        $semester = filter_var($_POST['semester'], FILTER_SANITIZE_STRING);
-        $academic = filter_var($_POST['academic'], FILTER_SANITIZE_STRING);
-
-        // Check if all required fields are provided
-        if (empty($studentId) || empty($studentName) || empty($departmentName) || 
-            empty($className) || empty($c_id) || empty($studyMode) || 
-            empty($faculty) || empty($studentnumber) || empty($password) || 
-            empty($semester) || empty($academic)) {
-            echo json_encode(["success" => false, "message" => "All fields are required."]);
-            exit();
-        }
-
-        // Check if student ID already exists
-        $checkSql = "SELECT * FROM students WHERE student_id = :studentId";
-        $checkStmt = $conn->prepare($checkSql);
-        $checkStmt->bindParam(':studentId', $studentId, PDO::PARAM_INT);
-        $checkStmt->execute();
-
-        if ($checkStmt->rowCount() > 0) {
-            echo json_encode(["success" => false, "message" => "Student ID already exists."]);
-            exit();
-        }
-
-        // Insert new student into database
-        $insertSql = "INSERT INTO students (
-            student_id, student_name, department_name, class_name, 
-            c_id, study_mode, faculty_name, tell, password, 
-            semester, academic, status
-        ) VALUES (
-            :studentId, :studentName, :departmentName, :className, 
-            :c_id, :studyMode, :faculty, :studentnumber, :password,
-            :semester, :academic, 'pending'
-        )";
-        
-        $insertStmt = $conn->prepare($insertSql);
-        $insertStmt->bindParam(':studentId', $studentId, PDO::PARAM_INT);
-        $insertStmt->bindParam(':studentName', $studentName, PDO::PARAM_STR);
-        $insertStmt->bindParam(':departmentName', $departmentName, PDO::PARAM_STR);
-        $insertStmt->bindParam(':className', $className, PDO::PARAM_STR);
-        $insertStmt->bindParam(':c_id', $c_id, PDO::PARAM_STR);
-        $insertStmt->bindParam(':studyMode', $studyMode, PDO::PARAM_STR);
-        $insertStmt->bindParam(':faculty', $faculty, PDO::PARAM_STR);
-        $insertStmt->bindParam(':studentnumber', $studentnumber, PDO::PARAM_STR);
-        $insertStmt->bindParam(':password', $password, PDO::PARAM_STR);
-        $insertStmt->bindParam(':semester', $semester, PDO::PARAM_STR);
-        $insertStmt->bindParam(':academic', $academic, PDO::PARAM_STR);
-
-        if ($insertStmt->execute()) {
-            echo json_encode(["success" => true, "message" => "Student added successfully."]);
-        } else {
-            throw new Exception("Error inserting student.");
-        }
-    } else {
-        echo json_encode(["success" => false, "message" => "Invalid request method."]);
+    // Get faculty information from session
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
-} catch (PDOException $e) {
+
+    $faculty_id = $sessionInfo['faculty_id'];
+
+    if ($_SERVER["REQUEST_METHOD"] != "POST") {
+        throw new Exception("Invalid request method");
+    }
+
+    $class_id = trim($_POST['class_id'] ?? '');
+    $student_id = trim($_POST['student_id'] ?? '');
+    $full_name = trim($_POST['full_name'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+    $status = trim($_POST['status'] ?? 'approved');
+
+    // Validate required fields with specific error messages
+    $missing_fields = [];
+    if (empty($class_id)) $missing_fields[] = 'Class ID';
+    if (empty($student_id)) $missing_fields[] = 'Student ID';
+    if (empty($full_name)) $missing_fields[] = 'Student Name';
+    if (empty($phone)) $missing_fields[] = 'Student Number';
+    if (empty($password)) $missing_fields[] = 'Password';
+    
+    if (!empty($missing_fields)) {
+        throw new Exception("Missing required fields: " . implode(', ', $missing_fields));
+    }
+
+    // Verify that the class belongs to this faculty
+    $verify_sql = "SELECT id FROM classes WHERE id = ? AND faculty_id = ?";
+    $verify_stmt = $conn->prepare($verify_sql);
+    $verify_stmt->execute([$class_id, $faculty_id]);
+    
+    if (!$verify_stmt->fetch()) {
+        throw new Exception("Access denied - class not found or doesn't belong to your faculty");
+    }
+
+    // Check if student_id already exists
+    $check_student_id_sql = "SELECT id, full_name FROM students WHERE student_id = ?";
+    $check_student_id_stmt = $conn->prepare($check_student_id_sql);
+    $check_student_id_stmt->execute([$student_id]);
+    $existing_student = $check_student_id_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($existing_student) {
+        throw new Exception("Student ID '{$student_id}' already exists(may be its not your faculty) (used by: {$existing_student['full_name']})");
+    }
+
+    // Hash the password
+    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+    // Insert new student
+    $insert_sql = "INSERT INTO students (student_id, class_id, full_name, phone, password, status) 
+                   VALUES (?, ?, ?, ?, ?, ?)";
+    $insert_stmt = $conn->prepare($insert_sql);
+
+    if (!$insert_stmt->execute([$student_id, $class_id, $full_name, $phone, $hashed_password, $status])) {
+        $errorInfo = $insert_stmt->errorInfo();
+        throw new Exception("Database error: " . $errorInfo[2]);
+    }
+
+    ob_clean();
+    echo json_encode([
+        "success" => true, 
+        "message" => "Student added successfully"
+    ]);
+
+} catch (Exception $e) {
+    ob_clean();
     echo json_encode(["success" => false, "message" => $e->getMessage()]);
+} catch (PDOException $e) {
+    ob_clean();
+    echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
 }
+
+ob_end_flush();
 ?>

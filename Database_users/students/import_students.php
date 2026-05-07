@@ -1,123 +1,144 @@
 <?php
-session_start();
+// CSV ONLY IMPORT - NO EXCEL LIBRARY, NO HTML GARBAGE
+date_default_timezone_set('Africa/Mogadishu');
+error_reporting(0);
+ini_set('display_errors', 0);
+ob_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['username']) || !isset($_SESSION['faculty'])) {
-    header("Location: ../interval/Auth_user.php");
-    exit();
-}
-
+include "../../Account_users/session_faculty.php";
 include "../../connection/connect.php";
-require('../../library/php-excel-reader/excel_reader2.php');
-require('../../library/SpreadsheetReader.php');
 
-$response = ['status' => 'error', 'message' => ''];
+ob_clean();
+header('Content-Type: application/json');
 
 try {
-    // Check if the required fields are set, including file upload and form fields
-    if (isset($_FILES['file']) && isset($_POST['departmentName']) && isset($_POST['className']) && isset($_POST['studyMode']) && isset($_POST['class_id']) && isset($_POST['faculty']) && isset($_POST['password'])) {
-        // Sanitize user input
-        $department_name = filter_var($_POST['departmentName'], FILTER_SANITIZE_STRING);
-        $className = filter_var($_POST['className'], FILTER_SANITIZE_STRING);
-        $studyMode = filter_var($_POST['studyMode'], FILTER_SANITIZE_STRING);
-        $class_id = filter_var($_POST['class_id'], FILTER_SANITIZE_STRING);
-        $faculty = filter_var($_POST['faculty'], FILTER_SANITIZE_STRING);
-        $password = filter_var($_POST['password'], FILTER_SANITIZE_STRING);
-
-        // Allowed MIME types for file uploads
-        $allowedMimes = [
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/xls',
-            'text/xlsx',
-            'application/vnd.oasis.opendocument.spreadsheet'
-        ];
-
-        // Check if the uploaded file is an Excel file
-        $fileType = $_FILES["file"]["type"];
-        if (in_array($fileType, $allowedMimes)) {
-            $uploadFilePath = '../../uploads/' . basename($_FILES['file']['name']);
-            if (move_uploaded_file($_FILES['file']['tmp_name'], $uploadFilePath)) {
-                // Read the uploaded Excel file
-                $Reader = new SpreadsheetReader($uploadFilePath);
-                $Reader->ChangeSheet(0); // Process the first sheet
-
-                $count = 0;
-                $errors = [];
-                $insertSuccess = true;
-
-                // Prepare SQL statements for checking duplicates and inserting data
-                $checkStmt = $conn->prepare("SELECT COUNT(*) FROM students WHERE student_id = :student_id AND department_name = :department_name");
-                $insertStmt = $conn->prepare("INSERT INTO students (student_id, student_name, tell, department_name, class_name, c_id, study_mode, faculty_name, password) VALUES (:student_id, :student_name, :tell, :department_name, :class_name, :c_id, :study_mode, :faculty_name, :password)");
-
-                // Loop through each row in the spreadsheet
-                foreach ($Reader as $Row) {
-                    $count++;
-
-                    // Check if row data is incomplete (we expect at least 3 columns)
-                    if (count($Row) < 3) {
-                        $errors[] = "Incomplete data at row $count";
-                        continue;
-                    }
-
-                    // Sanitize and prepare the data for each student
-                    $student_id = isset($Row[0]) ? filter_var($Row[0], FILTER_SANITIZE_STRING) : '';
-                    $student_name = isset($Row[1]) ? filter_var($Row[1], FILTER_SANITIZE_STRING) : '';
-                    $tell = isset($Row[2]) ? filter_var($Row[2], FILTER_SANITIZE_STRING) : '';
-
-                    // Skip rows that contain empty cells (student_id, student_name, tell, or password)
-                    if (empty($student_id) || empty($student_name) || empty($tell) || empty($password)) {
-                        continue;
-                    }
-
-                    // Check if the student ID already exists in the database
-                    $checkStmt->bindParam(':student_id', $student_id, PDO::PARAM_STR);
-                    $checkStmt->bindParam(':department_name', $department_name, PDO::PARAM_STR);
-                    $checkStmt->execute();
-                    $countExists = $checkStmt->fetchColumn();
-
-                    // Skip duplicate entries
-                    if ($countExists > 0) {
-                        $errors[] = "This ID '$student_id' already exists.";
-                        $insertSuccess = false;
-                        continue;
-                    }
-
-                    // Insert the student data, including the plain-text password
-                    $insertStmt->bindParam(':student_id', $student_id, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':student_name', $student_name, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':tell', $tell, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':department_name', $department_name, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':class_name', $className, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':c_id', $class_id, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':study_mode', $studyMode, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':faculty_name', $faculty, PDO::PARAM_STR);
-                    $insertStmt->bindParam(':password', $password, PDO::PARAM_STR); // No hashing here
-
-                    if (!$insertStmt->execute()) {
-                        $errors[] = "Failed to insert row $count: " . $insertStmt->errorInfo()[2];
-                    }
-                }
-
-                // Provide feedback based on success or errors
-                if ($insertSuccess && empty($errors)) {
-                    $response['status'] = 'success';
-                    $response['message'] = 'Students imported successfully';
-                } else {
-                    $response['message'] = 'Students imported successfully, but some duplicates were ignored. ' . implode(', ', $errors);
-                }
-            } else {
-                $response['message'] = 'Failed to move uploaded file.';
-            }
-        } else {
-            $response['message'] = 'Only Excel files are allowed!';
-        }
-    } else {
-        $response['message'] = 'No file uploaded or missing department/class information.';
+    $sessionInfo = getSessionInfo();
+    if (!$sessionInfo) {
+        throw new Exception("Session error - please login again");
     }
+
+    $faculty_id = $sessionInfo['faculty_id'];
+    $class_id = trim($_POST['class_id'] ?? '');
+
+    if (empty($class_id)) {
+        throw new Exception("Class ID is required");
+    }
+
+    // Verify class
+    $verify_stmt = $conn->prepare("SELECT id, class_name FROM classes WHERE id = ? AND faculty_id = ?");
+    $verify_stmt->execute([$class_id, $faculty_id]);
+    $class_data = $verify_stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$class_data) {
+        throw new Exception("Access denied - class not found");
+    }
+    
+    $class_name = $class_data['class_name'];
+
+    if (!isset($_FILES['excel_file']) || $_FILES['excel_file']['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception("Please select a valid file");
+    }
+
+    $file = $_FILES['excel_file'];
+    $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+    // ONLY ACCEPT CSV
+    if ($file_extension !== 'csv') {
+        throw new Exception("Only CSV files are allowed! Please save your Excel as CSV first (File → Save As → CSV UTF-8)");
+    }
+
+    $imported_count = 0;
+    $skipped_count = 0;
+    $duplicate_ids = [];
+    $processed_ids = [];
+
+    // Read CSV file with UTF-8 BOM handling
+    $handle = fopen($file['tmp_name'], 'r');
+    if (!$handle) {
+        throw new Exception("Could not open CSV file");
+    }
+
+    $row_number = 0;
+    while (($row = fgetcsv($handle, 1000, ',')) !== FALSE) {
+        $row_number++;
+        
+        // Skip empty rows
+        if (empty(array_filter($row))) {
+            continue;
+        }
+
+        try {
+            // Expected: Column 0 = Student ID, Column 1 = Name, Column 2 = Phone
+            // Remove BOM and trim whitespace
+            $student_id = trim(preg_replace('/^\x{FEFF}/u', '', $row[0] ?? ''));
+            $full_name = trim(preg_replace('/^\x{FEFF}/u', '', $row[1] ?? ''));
+            $phone = trim($row[2] ?? '');
+            $password = $class_name;
+
+            // Validate required fields
+            if (empty($student_id) || empty($full_name) || empty($phone)) {
+                $skipped_count++;
+                $duplicate_ids[] = "Row {$row_number}: Missing required fields";
+                continue;
+            }
+
+            // Check for duplicates in file
+            if (in_array($student_id, $processed_ids)) {
+                $skipped_count++;
+                $duplicate_ids[] = "Student ID {$student_id} (duplicate in file)";
+                continue;
+            }
+
+            // Check if exists in database
+            $check_stmt = $conn->prepare("SELECT id FROM students WHERE student_id = ?");
+            $check_stmt->execute([$student_id]);
+            
+            if ($check_stmt->fetch()) {
+                $skipped_count++;
+                $duplicate_ids[] = "Student ID {$student_id} (already exists)";
+                continue;
+            }
+
+            // Insert student
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+            $insert_stmt = $conn->prepare("INSERT INTO students (student_id, class_id, full_name, phone, password, status) VALUES (?, ?, ?, ?, ?, 'approved')");
+            
+            if ($insert_stmt->execute([$student_id, $class_id, $full_name, $phone, $hashed_password])) {
+                $imported_count++;
+                $processed_ids[] = $student_id;
+            } else {
+                $skipped_count++;
+                $duplicate_ids[] = "Row {$row_number}: Database error";
+            }
+
+        } catch (Exception $e) {
+            $skipped_count++;
+            $duplicate_ids[] = "Row {$row_number}: " . $e->getMessage();
+        }
+    }
+    fclose($handle);
+
+    $message = "Import completed! ";
+    if ($imported_count > 0) {
+        $message .= "{$imported_count} students imported successfully. ";
+    }
+    if ($skipped_count > 0) {
+        $message .= "{$skipped_count} students skipped.";
+    }
+
+    ob_clean();
+    echo json_encode([
+        "success" => true,
+        "message" => $message,
+        "imported_count" => $imported_count,
+        "skipped_count" => $skipped_count,
+        "duplicate_ids" => $duplicate_ids
+    ]);
+
 } catch (Exception $e) {
-    $response['message'] = $e->getMessage();
+    ob_clean();
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }
 
-echo json_encode($response);
+ob_end_flush();
 ?>
