@@ -67,19 +67,18 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <span class="menu-header-text">Application</span>
         </li>
 
-        <!-- Notifications Section -->
-        <li class="menu-item <?php echo in_array($current_page, ['notification.php', 'another_notification_page.php']) ? 'active' : ''; ?>">
+        <!-- Report Absents Section -->
+        <li class="menu-item <?php echo in_array($current_page, ['selection_absents.php', 'absents.php']) ? 'active' : ''; ?>">
             <a href="javascript:void(0);" class="menu-link menu-toggle">
-                <i class='bx bxs-bell-plus'></i>
-                <div data-i18n="Notifications">Report Absents</div>
+                <i class='menu-icon tf-icons bx bxs-bell-plus'></i>
+                <div data-i18n="Report Absents">Report Absents</div>
             </a>
             <ul class="menu-sub">
-                <li class="menu-item <?php echo $current_page == 'notification.php' ? 'active' : ''; ?>">
-                    <a href="selection_Absents.php" class="menu-link">
-                        <div data-i18n="Add Notification">Absents</div>
+                <li class="menu-item <?php echo $current_page == 'selection_absents.php' ? 'active' : ''; ?>">
+                    <a href="selection_absents.php" class="menu-link">
+                        <div data-i18n="Absents">Absents</div>
                     </a>
                 </li>
-                <!-- Add more sub-menu items if needed -->
             </ul>
         </li>
     </ul>
