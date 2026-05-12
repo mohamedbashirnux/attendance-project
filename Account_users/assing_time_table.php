@@ -133,7 +133,7 @@ try {
     </style>
 </head>
 <body>
-    <!-- Toast Notifications -->
+    <!-- Toast Notification -->
     <div class="toast-container">
         <div id="addSuccessToast" class="toast bg-success text-white" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="toast-header bg-success text-white">
