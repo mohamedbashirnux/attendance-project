@@ -7,7 +7,7 @@ $faculty_id = $sessionInfo['faculty_id'];
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Department - Simple Version</title>
+    <title>Department - Simple </title>
     <link rel="stylesheet" href="../assets/vendor/css/core.css" />
 </head>
 <body>
